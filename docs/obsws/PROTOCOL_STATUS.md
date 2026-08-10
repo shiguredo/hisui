@@ -93,7 +93,7 @@
   - [ ] `renderSkippedFrames`: レンダーでスキップしたフレーム数を返す（ 現状は `0` 固定 ）
   - [ ] `renderTotalFrames`: レンダー総フレーム数を返す（ 現状は `0` 固定 ）
   - [x] `outputSkippedFrames`: 出力でスキップしたフレーム数を返す
-    - NOTE: 現在アクティブな stream / record 出力の keyframe 待機ドロップ数を合算して返す
+    - NOTE: 現在アクティブな stream 出力の keyframe 待機ドロップ数を返す (record 出力は writer に drop 経路がないため常に 0)
   - [x] `outputTotalFrames`: 出力総フレーム数を返す
     - NOTE: 現在アクティブな stream / record 出力のフレーム数を合算して返す
   - [x] `webSocketSessionIncomingMessages`: 現在セッションの受信メッセージ数を返す
@@ -355,7 +355,7 @@ NOTE: `--state-file` 指定時、scene item の作成・削除・有効/無効�
   - [x] `outputBytes`: 出力バイト数を返す
     - NOTE: 現在の録画ファイルサイズを返す
   - [x] `outputSkippedFrames`: 出力スキップフレーム数を返す
-    - NOTE: keyframe 待機中に drop した映像フレーム数を返す
+    - NOTE: MP4 writer は keyframe 待ちによる drop 経路を持たないため常に 0 を返す
   - [x] `outputTotalFrames`: 出力総フレーム数を返す
     - NOTE: MP4 writer の `total_video_sample_count` を返す
   - [x] `outputPath`: 録画ファイルパスを返す

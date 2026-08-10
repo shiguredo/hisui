@@ -1104,22 +1104,17 @@ pub(crate) fn collect_output_runtime_stats_from_outputs(
             )
         })
         .unwrap_or(0);
-    let (record_total_frames, record_skipped_frames) = record_run
+    let record_total_frames = record_run
         .map(|run| {
-            (
-                find_output_counter_metric(
-                    &entries,
-                    &run.writer_processor_id,
-                    "total_video_sample_count",
-                ),
-                find_output_counter_metric(
-                    &entries,
-                    &run.writer_processor_id,
-                    "total_keyframe_wait_dropped_video_frame_count",
-                ),
+            find_output_counter_metric(
+                &entries,
+                &run.writer_processor_id,
+                "total_video_sample_count",
             )
         })
-        .unwrap_or((0, 0));
+        .unwrap_or(0);
+    // 録画出力 (Mp4Writer) はキーフレーム待ちによる drop 経路を持たないため常に 0 になる
+    let record_skipped_frames = 0;
 
     ObswsOutputRuntimeStats {
         stream_output_bytes,

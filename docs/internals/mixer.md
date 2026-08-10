@@ -16,7 +16,6 @@ Hisui の mixer は単なる描画処理や加算処理ではありません。
 
 以下は対象外です。
 
-- `compose` 用の offline mixer アルゴリズム詳細
 - レイアウト JSON の仕様
 - `media_pipeline` 自体の command / RPC 設計
 
@@ -273,16 +272,14 @@ metrics 基盤自体は、 [`stats` / メトリクスの仕組み](stats.md) を
 
 ## どこから読むか
 
+コードを追う時は、以下の順で読むと理解しやすいです。
+
 1. `src/mixer/video.rs`
    - realtime video mixer の全体像と `Syn/Ack` を確認する
 2. `src/mixer/audio.rs`
    - input queue と sample ベース時間軸を確認する
 3. `src/timestamp/sample_aligner.rs`
    - audio mixer の時間補正を確認する
-4. `tests/mixer_video_tests.rs`
-   - 合成結果とレイアウト反映の期待値を見る
-5. `tests/mixer_audio_tests.rs`
-   - gap、 trim、混在期間の期待値を見る
 
 ## まとめ
 

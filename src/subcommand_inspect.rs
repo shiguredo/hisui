@@ -14,7 +14,6 @@ use crate::{
     types::{CodecName, ContainerFormat},
     video::h264::H264AnnexBNalUnits,
     video::{VideoFormat, VideoFrame},
-    webm::file_reader::{WebmFileReader, WebmFileReaderOptions},
 };
 use shiguredo_openh264::Openh264Library;
 
@@ -25,7 +24,7 @@ const VIDEO_DECODED_TRACK_ID: &str = "video_decoded";
 
 pub fn try_run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result<bool> {
     if !noargs::cmd("inspect")
-        .doc("録画ファイルの情報を取得します")
+        .doc("MP4 ファイルの情報を取得します")
         .take(args)
         .is_present()
     {
@@ -55,7 +54,7 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
         .present_and_then(|a| a.value().parse())?;
     let input_file_path: PathBuf = noargs::arg("INPUT_FILE")
         .example("/path/to/archive.mp4")
-        .doc("情報取得対象の録画ファイル(.mp4|.webm)")
+        .doc("情報取得対象の MP4 ファイル (.mp4)")
         .take(args)
         .then(|a| a.value().parse())?;
 
@@ -77,8 +76,8 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
 
 /// 入力ファイルのコンテナー形式を判定する
 ///
-/// 拡張子で `Mp4` / `Webm` を判定したうえで、`Mp4` の場合のみファイル実体
-/// (ftyp / moov) を見て fragmented MP4 なら `Fmp4` に補正する。
+/// 拡張子で `Mp4` を判定したうえで、ファイル実体 (ftyp / moov) を見て
+/// fragmented MP4 なら `Fmp4` に補正する。
 /// 破損ファイル等で判定に失敗した場合はエラーを伝播し、`Mp4` へはフォールバックしない
 /// (後段の reader 初期化でも同じ判定で失敗するため情報は失われない)。
 fn detect_container_format(path: &Path) -> Result<ContainerFormat> {
@@ -158,23 +157,6 @@ async fn setup_pipeline(
                 .spawn_processor(
                     crate::ProcessorId::new("mp4_file_reader"),
                     crate::ProcessorMetadata::new("mp4_file_reader"),
-                    |handle| reader.run(handle),
-                )
-                .await?;
-        }
-        ContainerFormat::Webm => {
-            let reader = WebmFileReader::new(
-                input_file_path,
-                WebmFileReaderOptions {
-                    audio_track_id: Some(crate::TrackId::new(AUDIO_ENCODED_TRACK_ID)),
-                    video_track_id: Some(crate::TrackId::new(VIDEO_ENCODED_TRACK_ID)),
-                },
-            );
-
-            pipeline_handle
-                .spawn_processor(
-                    crate::ProcessorId::new("webm_file_reader"),
-                    crate::ProcessorMetadata::new("webm_file_reader"),
                     |handle| reader.run(handle),
                 )
                 .await?;
@@ -360,7 +342,7 @@ impl VideoCodecSpecificInfo {
                 let mut nalus = Vec::new();
                 let mut data = &sample.data[..];
 
-                // NOTE: sora の場合は区切りバイトサイズは 4 に固定
+                // NOTE: H.264 の AVCC 形式では区切りバイトサイズは 4 に固定
                 while data.len() > 4 {
                     let length = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
                     data = &data[4..];
@@ -683,15 +665,6 @@ mod tests {
             detect_container_format(Path::new("testdata/red-320x320-h264-aac-fragmented.mp4"))
                 .expect("fMP4 の判定に成功すること"),
             ContainerFormat::Fmp4
-        );
-    }
-
-    #[test]
-    fn detect_webm_as_webm() {
-        assert_eq!(
-            detect_container_format(Path::new("testdata/archive-black-silent.webm"))
-                .expect("WebM の判定に成功すること"),
-            ContainerFormat::Webm
         );
     }
 

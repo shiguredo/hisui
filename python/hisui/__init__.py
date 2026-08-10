@@ -19,8 +19,8 @@ class Hisui:
 
     Example:
         with Hisui() as hisui:
-            # Get recording file information
-            info = hisui.inspect("input.webm")
+            # Get media file information
+            info = hisui.inspect("input.mp4")
             print(info)
 
             # List available codecs
@@ -83,7 +83,7 @@ class Hisui:
 
     def inspect(self, input_file: str, decode: bool = False) -> dict[str, Any]:
         """
-        Get recording file information
+        Get media file information
 
         Args:
             input_file: Input file path

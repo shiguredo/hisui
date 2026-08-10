@@ -294,4 +294,4 @@ bootstrap 接続では、クライアントから送られてきた remote video
 - [全体アーキテクチャ](architecture_overview.md)
 - [`obsws` の仕組み](obsws.md)
 - [`stats` / メトリクスの仕組み](stats.md)
-- [OBS WebSocket 互換機能 実装状況](../docs/obsws/PROTOCOL_STATUS.md)
+- [OBS WebSocket 互換機能 実装状況](../obsws/PROTOCOL_STATUS.md)

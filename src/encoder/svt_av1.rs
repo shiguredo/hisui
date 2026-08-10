@@ -119,7 +119,7 @@ mod tests {
                 numerator: NonZeroUsize::MIN.saturating_add(29),
                 denumerator: NonZeroUsize::MIN,
             },
-            encode_params: crate::encoder::default_video_encode_config_for_rpc(),
+            encode_params: crate::encoder::EncodeConfig::default(),
         }
     }
 

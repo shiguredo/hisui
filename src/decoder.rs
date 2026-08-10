@@ -63,12 +63,12 @@ pub enum DrainResult {
 impl AudioDecoder {
     pub fn new(
         #[cfg(feature = "fdk-aac")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
-        mut compose_stats: crate::stats::Stats,
+        mut stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
-        let engine_metric = compose_stats.string("engine");
-        let codec_metric = compose_stats.string("codec");
-        let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
-        compose_stats.flag("error").set(false);
+        let engine_metric = stats.string("engine");
+        let codec_metric = stats.string("codec");
+        let total_audio_data_count_metric = stats.counter("total_audio_data_count");
+        stats.flag("error").set(false);
         Ok(Self {
             #[cfg(feature = "fdk-aac")]
             fdk_aac_lib,
@@ -400,13 +400,12 @@ pub struct VideoDecoder {
 }
 
 impl VideoDecoder {
-    pub fn new(options: VideoDecoderOptions, mut compose_stats: crate::stats::Stats) -> Self {
-        let engine_metric = compose_stats.string("engine");
-        let codec_metric = compose_stats.string("codec");
-        let total_input_video_frame_count_metric =
-            compose_stats.counter("total_input_video_frame_count");
-        let total_output_metric = compose_stats.counter("total_output_video_frame_count");
-        compose_stats.flag("error").set(false);
+    pub fn new(options: VideoDecoderOptions, mut stats: crate::stats::Stats) -> Self {
+        let engine_metric = stats.string("engine");
+        let codec_metric = stats.string("codec");
+        let total_input_video_frame_count_metric = stats.counter("total_input_video_frame_count");
+        let total_output_metric = stats.counter("total_output_video_frame_count");
+        stats.flag("error").set(false);
         let (tx, output_rx) = tokio::sync::mpsc::unbounded_channel();
         let sink = OutputSink::new(tx, total_output_metric);
         Self {

@@ -77,7 +77,6 @@ impl FromStr for CodecName {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum ContainerFormat {
     #[default]
-    Webm,
     Mp4,
     /// fragmented MP4（fMP4）
     ///
@@ -97,27 +96,11 @@ impl ContainerFormat {
         })?;
         if ext == "mp4" {
             Ok(Self::Mp4)
-        } else if ext == "webm" {
-            Ok(Self::Webm)
         } else {
             Err(crate::Error::new(format!(
-                "unexpected media file extension: {}",
+                "unexpected media file extension: {} (only .mp4 is supported)",
                 path.as_ref().display()
             )))
-        }
-    }
-
-    /// Sora 録画メタデータ (`*.json`) の `format` フィールドをパースする
-    ///
-    /// Sora の録画ファイルは通常 MP4 か WebM のみで fMP4 は出力されないため、
-    /// `"mp4"` / `"webm"` だけを受理し `Fmp4` は生成しない。
-    pub fn parse_sora_recording_format(
-        value: nojson::RawJsonValue<'_, '_>,
-    ) -> Result<Self, nojson::JsonParseError> {
-        match value.as_string_str()? {
-            "webm" => Ok(Self::Webm),
-            "mp4" => Ok(Self::Mp4),
-            v => Err(value.invalid(format!("unknown container format: {v}"))),
         }
     }
 }
@@ -125,7 +108,6 @@ impl ContainerFormat {
 impl nojson::DisplayJson for ContainerFormat {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         match self {
-            ContainerFormat::Webm => f.string("webm"),
             ContainerFormat::Mp4 => f.string("mp4"),
             ContainerFormat::Fmp4 => f.string("fmp4"),
         }

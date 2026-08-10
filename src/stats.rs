@@ -260,17 +260,6 @@ impl StatsValue {
         }
     }
 
-    pub fn as_bool_for_sora_recording_compose(&self) -> bool {
-        match self {
-            Self::Flag(flag) => flag.get(),
-            Self::Counter(counter) => counter.get() != 0,
-            Self::Gauge(gauge) => gauge.get() != 0,
-            Self::GaugeF64(gauge) => gauge.get() != 0.0,
-            Self::Duration(duration) => duration.get() != Duration::ZERO,
-            Self::StringValue(string_value) => !string_value.get().is_empty(),
-        }
-    }
-
     fn kind_name(&self) -> &'static str {
         match self {
             Self::Counter(_) => "counter",

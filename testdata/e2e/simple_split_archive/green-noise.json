@@ -1,8 +1,0 @@
-{
-  "connection_id": "foo",
-  "format": "mp4",
-  "audio": true,
-  "video": true,
-  "start_time_offset": 1,
-  "stop_time_offset": 2
-}

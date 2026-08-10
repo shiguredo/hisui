@@ -119,7 +119,8 @@ impl VideoToolboxDecoder {
     // H264/H265: VPS/SPS/PPS の変化で判定
     // VP9/AV1: 解像度の変化で判定
     //
-    // [NOTE] WebM 対応がなくなったら VideoDecoder 側でサンプルエントリーの変更を見てハンドリングできる
+    // [NOTE] WebM 対応削除によりサンプルエントリーの変更を見て判定できるようになったが、
+    // 現状は上記の組み合わせ判定のままにしている
     fn reinitialize_if_need(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         if !frame.keyframe {
             // 切り替わりが発生するのは必ずキーフレーム

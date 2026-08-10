@@ -51,12 +51,6 @@ pub(crate) enum InputTrackKind {
 
 #[derive(Debug)]
 pub enum Mp4WriterRpcMessage {
-    Pause {
-        reply_tx: tokio::sync::oneshot::Sender<crate::Result<()>>,
-    },
-    Resume {
-        reply_tx: tokio::sync::oneshot::Sender<crate::Result<()>>,
-    },
     /// writer をファイナライズして正常終了する
     Finish {
         reply_tx: tokio::sync::oneshot::Sender<()>,
@@ -95,8 +89,6 @@ pub struct Mp4WriterStats {
     total_video_sample_data_byte_size: crate::stats::StatsCounter,
     total_audio_track_duration: crate::stats::StatsDuration,
     total_video_track_duration: crate::stats::StatsDuration,
-    total_keyframe_wait_dropped_audio_sample_count: crate::stats::StatsCounter,
-    total_keyframe_wait_dropped_video_frame_count: crate::stats::StatsCounter,
     total_received_audio_data_count: crate::stats::StatsCounter,
     total_received_audio_eos_count: crate::stats::StatsCounter,
     total_received_video_data_count: crate::stats::StatsCounter,
@@ -130,10 +122,6 @@ impl Mp4WriterStats {
         let total_audio_sample_count = stats.counter("total_audio_sample_count");
         let total_audio_sample_data_byte_size = stats.counter("total_audio_sample_data_byte_size");
         let total_audio_track_duration = stats.duration("total_audio_track_seconds");
-        let total_keyframe_wait_dropped_audio_sample_count =
-            stats.counter("total_keyframe_wait_dropped_audio_sample_count");
-        let total_keyframe_wait_dropped_video_frame_count =
-            stats.counter("total_keyframe_wait_dropped_video_frame_count");
         let total_received_audio_data_count = stats.counter("total_received_audio_data_count");
         let total_received_audio_eos_count = stats.counter("total_received_audio_eos_count");
         let total_received_video_data_count = stats.counter("total_received_video_data_count");
@@ -161,8 +149,6 @@ impl Mp4WriterStats {
             total_video_sample_data_byte_size,
             total_audio_track_duration,
             total_video_track_duration,
-            total_keyframe_wait_dropped_audio_sample_count,
-            total_keyframe_wait_dropped_video_frame_count,
             total_received_audio_data_count,
             total_received_audio_eos_count,
             total_received_video_data_count,
@@ -237,14 +223,6 @@ impl Mp4WriterStats {
         self.total_audio_sample_count.inc();
         self.total_audio_sample_data_byte_size.add(data_size as u64);
         self.total_audio_track_duration.add(duration);
-    }
-
-    pub(crate) fn add_keyframe_wait_dropped_video_frame(&self) {
-        self.total_keyframe_wait_dropped_video_frame_count.inc();
-    }
-
-    pub(crate) fn add_keyframe_wait_dropped_audio_sample(&self) {
-        self.total_keyframe_wait_dropped_audio_sample_count.inc();
     }
 
     pub(crate) fn add_received_audio_data(&self) {
@@ -342,17 +320,9 @@ impl Mp4WriterStats {
     pub fn total_video_track_duration(&self) -> Duration {
         self.total_video_track_duration.get()
     }
-
-    pub fn total_keyframe_wait_dropped_video_frame_count(&self) -> u64 {
-        self.total_keyframe_wait_dropped_video_frame_count.get()
-    }
-
-    pub fn total_keyframe_wait_dropped_audio_sample_count(&self) -> u64 {
-        self.total_keyframe_wait_dropped_audio_sample_count.get()
-    }
 }
 
-/// 録画の一時停止・再開やキュー管理など、MP4 ライター間で共有する状態とメソッドをまとめた構造体
+/// キュー管理など、 MP4 ライター間で共有する状態とメソッドをまとめた構造体
 #[derive(Debug)]
 pub(crate) struct WriterCore {
     pub(crate) input_audio_track_id: Option<TrackId>,
@@ -363,11 +333,6 @@ pub(crate) struct WriterCore {
     pub(crate) pending_video_frame: Option<Arc<VideoFrame>>,
     pub(crate) last_audio_duration: Option<Duration>,
     pub(crate) last_video_duration: Option<Duration>,
-    pub(crate) paused: bool,
-    pub(crate) resume_waiting_for_keyframe: bool,
-    pub(crate) resume_offset_update_pending: bool,
-    pub(crate) pause_anchor_timestamp: Option<Duration>,
-    pub(crate) timeline_timestamp_offset: Duration,
     pub(crate) appending_video_chunk: bool,
     pub(crate) stats: Mp4WriterStats,
 }
@@ -387,96 +352,9 @@ impl WriterCore {
             pending_video_frame: None,
             last_audio_duration: None,
             last_video_duration: None,
-            paused: false,
-            resume_waiting_for_keyframe: false,
-            resume_offset_update_pending: false,
-            pause_anchor_timestamp: None,
-            timeline_timestamp_offset: Duration::ZERO,
             appending_video_chunk: true,
             stats,
         }
-    }
-
-    pub(crate) fn pause_recording(&mut self) -> crate::Result<()> {
-        if self.paused {
-            return Err(crate::Error::new("recording is already paused"));
-        }
-        self.paused = true;
-        self.resume_waiting_for_keyframe = false;
-        self.resume_offset_update_pending = false;
-        Ok(())
-    }
-
-    pub(crate) fn resume_recording(&mut self) -> crate::Result<()> {
-        if !self.paused {
-            return Err(crate::Error::new("recording is not paused"));
-        }
-        self.paused = false;
-        self.resume_waiting_for_keyframe = self.input_video_track_id.is_some();
-        self.resume_offset_update_pending = true;
-        Ok(())
-    }
-
-    pub(crate) fn maybe_set_pause_anchor(&mut self, timestamp: Duration) {
-        if self.pause_anchor_timestamp.is_none() {
-            self.pause_anchor_timestamp = Some(timestamp);
-        }
-    }
-
-    pub(crate) fn maybe_apply_pause_offset(&mut self, resume_timestamp: Duration) {
-        if !self.resume_offset_update_pending {
-            return;
-        }
-        if let Some(pause_anchor_timestamp) = self.pause_anchor_timestamp.take() {
-            let paused_duration = resume_timestamp.saturating_sub(pause_anchor_timestamp);
-            self.timeline_timestamp_offset += paused_duration;
-        }
-        self.resume_offset_update_pending = false;
-    }
-
-    pub(crate) fn apply_timestamp_offset(&self, timestamp: Duration) -> Duration {
-        timestamp.saturating_sub(self.timeline_timestamp_offset)
-    }
-
-    pub(crate) fn prepare_audio_for_queue(
-        &mut self,
-        sample: Arc<AudioFrame>,
-    ) -> Option<Arc<AudioFrame>> {
-        if self.paused {
-            self.maybe_set_pause_anchor(sample.timestamp);
-            return None;
-        }
-        if self.resume_waiting_for_keyframe {
-            self.stats.add_keyframe_wait_dropped_audio_sample();
-            return None;
-        }
-        self.maybe_apply_pause_offset(sample.timestamp);
-        let mut sample = sample.as_ref().clone();
-        sample.timestamp = self.apply_timestamp_offset(sample.timestamp);
-        Some(Arc::new(sample))
-    }
-
-    pub(crate) fn prepare_video_for_queue(
-        &mut self,
-        frame: Arc<VideoFrame>,
-    ) -> Option<Arc<VideoFrame>> {
-        if self.paused {
-            self.maybe_set_pause_anchor(frame.timestamp);
-            return None;
-        }
-        if self.resume_waiting_for_keyframe {
-            if !frame.keyframe {
-                self.stats.add_keyframe_wait_dropped_video_frame();
-                return None;
-            }
-            self.maybe_apply_pause_offset(frame.timestamp);
-            self.resume_waiting_for_keyframe = false;
-        } else {
-            self.maybe_apply_pause_offset(frame.timestamp);
-        }
-        let mut frame = frame.as_ref().clone();
-        frame.timestamp = self.apply_timestamp_offset(frame.timestamp);
-        Some(Arc::new(frame))
     }
 
     pub(crate) fn handle_input_sample(
@@ -486,21 +364,16 @@ impl WriterCore {
     ) -> crate::Result<()> {
         match (track_kind, sample) {
             (InputTrackKind::Audio, Some(MediaFrame::Audio(sample))) => {
-                if let Some(sample) = self.prepare_audio_for_queue(sample) {
-                    self.input_audio_queue.push_back(sample);
-                }
+                self.input_audio_queue.push_back(sample);
             }
             (InputTrackKind::Audio, None) => {
                 self.input_audio_track_id = None;
             }
             (InputTrackKind::Video, Some(MediaFrame::Video(sample))) => {
-                if let Some(sample) = self.prepare_video_for_queue(sample) {
-                    self.input_video_queue.push_back(sample);
-                }
+                self.input_video_queue.push_back(sample);
             }
             (InputTrackKind::Video, None) => {
                 self.input_video_track_id = None;
-                self.resume_waiting_for_keyframe = false;
             }
             _ => {
                 self.stats.set_error();
@@ -967,22 +840,15 @@ impl Mp4Writer {
         };
 
         match rpc_message {
-            Mp4WriterRpcMessage::Pause { reply_tx } => {
-                let _ = reply_tx.send(self.core.pause_recording());
-            }
-            Mp4WriterRpcMessage::Resume { reply_tx } => {
-                let _ = reply_tx.send(self.core.resume_recording());
-            }
             Mp4WriterRpcMessage::Finish { reply_tx } => {
                 let _ = reply_tx.send(());
                 *rpc_rx_enabled = false;
                 // 入力トラックを閉じてファイナライズに遷移させる
                 self.core.input_video_track_id = None;
                 self.core.input_audio_track_id = None;
-                return Ok(true);
+                Ok(true)
             }
         }
-        Ok(false)
     }
 
     fn handle_audio_message(

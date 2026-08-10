@@ -16,25 +16,23 @@ Please read <https://github.com/shiguredo/oss/blob/master/README.en.md> before u
 
 ## Recording Composition Tool Hisui について
 
-Recording Composition Tool Hisui は WebRTC SFU Sora 向けの録画合成ツールです。
+Recording Composition Tool Hisui は、映像・音声のメディア処理ツールです。
 
-Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で出力するツールです。
+Sora 向けの録画合成機能は `sora-archive-compositor` に移行しました。
+Hisui は OBS WebSocket 互換サーバーを中心に、 WebRTC、 RTMP、 SRT、 RTSP、 HLS、 MPEG-DASH などによるメディアの入出力を提供します。
 
 ## 特徴
 
-- Sora が生成する録画ファイルや録画レポートをそのまま利用できます
-- 特に設定することなくすぐに使い始められます
-- 複雑なレイアウトを JSON で指定することができます
-- 用途に合わせた[エンコードパラメーターの指定](./docs/layout_encode_params.md)や[自動調整](./docs/command_tune.md)ができます
+- OBS WebSocket 互換サーバーでメディアの入出力を制御できます
+- WebRTC、 RTMP、 SRT、 RTSP、 HLS、 MPEG-DASH など多彩な入出力に対応しています
+- MP4 ファイルの詳細情報を取得できます
+- MP4 の音声を Whisper で文字起こしできます (実験的機能)
 
 ## 今後の Hisui について
 
-Hisui は Sora 向けの Recording Composition Tool 部分は `sora-archive-compositor` として別ツールとして独立します。
-
 ### Media Processing Tool Hisui とは
 
-- 現在は Sora の録画ファイルを合成する専用ツール
-- 今後は 映像・音声をパイプラインで自在に処理する汎用的なメディア処理ツール
+- 映像・音声をパイプラインで自在に処理する汎用的なメディア処理ツールを目指しています
 
 映像・音声の入力から出力まで、柔軟なパイプライン処理ができるようになります。
 
@@ -88,8 +86,8 @@ with Hisui() as hisui:
 
 ## ファイル形式
 
-- Sora が生成した MP4 または WebM ファイルに対応しています
-- 出力ファイル形式は MP4 に対応しています
+- MP4 ファイルの読み込みに対応しています
+- MP4、 HLS、 MPEG-DASH への出力に対応しています
 
 ## デコーダー/エンコーダー
 
@@ -229,28 +227,3 @@ H.265 が利用可能なバイナリを配布する事は、ライセンスが�
 
 - [Access Advance](https://accessadvance.com/ja/)
 - [Via Licensing Alliance](https://www.via-la.com/)
-
-## Hisui レガシー機能
-
-> [!IMPORTANT]
-> Hisui レガシー機能は 2025.1.x でのみ利用できます。
-
-新しい Hisui のレガシー機能は [レガシー版の Hisui](<https://github.com/shiguredo/hisui-legacy>) とほぼ互換性があります。
-レガシー版の Hisui は新しい Hisui が正式リリースしたタイミングで非推奨となります。
-Hisui レガシー機能は Hisui 2025.1.x でのみ利用できます。
-
-### 新しい Hisui とレガシー版 Hisui の違い
-
-- Rust で実装されています
-- macOS の Audio Toolbox を利用した AAC の音声デコード/エンコードに対応しています
-- macOS の Video Toolbox を利用した H.264/H.265 のハードウェアアクセラレーターの映像デコード/エンコードに対応しています
-- MP4 と WebM の入力形式に対応しています
-- 分割録画機能が出力するファイル形式に対応しています
-- 出力形式が MP4 形式のみです
-  - WebM での出力形式は非対応です
-- AV1 のデコーダに [dav1d](https://code.videolan.org/videolan/dav1d/) を利用しています
-- Intel VPL に非対応です
-- NVIDIA Video Codec に対応しています
-- NSGA-II（多目的最適化）によるエンコーダーパラメータの自動調整機能を利用できます
-
-詳細は [migrate_hisui_legacy\.md](docs/migrate_hisui_legacy.md) をご覧ください。

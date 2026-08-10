@@ -5,7 +5,7 @@ use crate::video::{
 };
 
 // H.265 の NAL ユニット前に付与されるサイズのバイト数
-// Sora / Hisui が生成するものは全て 4 バイトなので固定値でいい（H.264と同様）
+// Hisui の MP4 出力は常に 4 バイトで書き出すため固定値でいい（H.264と同様）
 pub use crate::video::h264::NALU_HEADER_LENGTH;
 
 // H.265 の NAL ユニットタイプ
@@ -1310,8 +1310,8 @@ pub(crate) mod tests {
     #[test]
     fn h265_sample_entry_from_vps_sps_pps_lists_maps_main_sps_to_hvcc() {
         // Main プロファイル + Level 3.1 / Single layer の SPS の各フィールドが HvccBox に
-        // 1:1 で反映されることを直接検証する。Sora 録画固定値 (general_level_idc: 123 等) で
-        // 埋まる旧挙動の回帰防止。
+        // 1:1 で反映されることを直接検証する。固定値で埋める旧実装 (general_level_idc: 123 等) の
+        // 回帰防止。
         let sps = HevcSpsBuilder::raw(1920, 1080).build();
         let (entry, _frame_size) = h265_sample_entry_from_vps_sps_pps_lists(
             vec![dummy_vps_nal()],
@@ -1482,8 +1482,8 @@ pub(crate) mod tests {
     fn h265_sample_entry_from_vps_sps_pps_lists_with_real_x265_1920x1080_sps_maps_to_hvcc() {
         // 実機 1920x1080 SPS を `h265_sample_entry_from_vps_sps_pps_lists` 経由で渡し、
         // emulation prevention byte 込みの SPS から HvccBox の各フィールドが
-        // SPS 由来実値で埋まることの結合担保を行う。Sora 録画固定値
-        // (general_level_idc=123 等) で埋まる旧挙動の回帰防止。
+        // SPS 由来実値で埋まることの結合担保を行う。固定値で埋める旧実装
+        // (general_level_idc=123 等) の回帰防止。
         let (entry, frame_size) = h265_sample_entry_from_vps_sps_pps_lists(
             vec![dummy_vps_nal()],
             vec![HEVC_SPS_1920X1080.to_vec()],
