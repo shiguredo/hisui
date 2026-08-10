@@ -19,7 +19,7 @@ hisui のリアルタイム動作 (WebRTC / obsws / rtmp 等の realtime 経路)
 
 0085 で導入された in-flight バックプレッシャーは、 現状応急処置として nvcodec のみに適用されている (`VideoEncoderInner::requires_backpressure` が nvcodec のみ true)。 これは libvpx VP9 (`lag_in_frames` native default ~25) / svt_av1 (`look_ahead_distance` native default ~33) / video_toolbox が warm-up 型で、 一律 `LIMIT = 3` を適用すると deadlock するための応急処置。 本 issue でこの応急処置を解消し、 encoder 種別に応じた LIMIT を計算して bp guard を全 encoder で有効化する。
 
-依存: issues/0085 (in-flight bp) 完了後に着手する。 0085 の応急処置を前提とする作業なので順序依存が明確。
+依存: issues/0085 (in-flight bp、 closed)。 0085 の応急処置を前提とする作業なので順序依存が明確。
 
 ## 優先度根拠
 
@@ -138,6 +138,6 @@ polish で確定。 リアルタイム経路の挙動変更として `[UPDATE]` 
 
 ## 関連
 
-- issues/0085 (`feature/refactor-encoder-inflight-backpressure`): 依存先。 本 issue は 0085 完了後に着手する。 0085 の応急処置 (`VideoEncoderInner::requires_backpressure`) を本 issue 完了時に削除する
+- issues/0085 (`feature/refactor-encoder-inflight-backpressure`、 closed): 依存先 (実装は develop に merge 済み)。 0085 の応急処置 (`VideoEncoderInner::requires_backpressure`) を本 issue 完了時に削除する
 - issues/0086 (`feature/add-realtime-video-mixer-skip-on-encoder-backpressure`): 同じく 0085 完了後の後続。 0086 の frame skip は bp guard が動作している前提のため、 本 issue で全 encoder に bp guard を戻すことで 0086 の効果が全 encoder に及ぶようになる
 - closed/0080 (2026-07-21 closed): 0085 の前身。 背景理解に参照

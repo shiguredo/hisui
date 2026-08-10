@@ -12,7 +12,7 @@ inspect コマンドの H.264 NAL 情報取得が「区切りバイトサイズ 
 ## 現状
 
 - `src/subcommand_inspect.rs` の `VideoCodecSpecificInfo::H264` 生成 (サンプルデータの NAL パース) が、NALU の区切りバイトサイズを 4 バイト固定と仮定している。この仮定は Sora 録画由来の名残であり、コメントも Sora 前提の表記だった (本 issue 起票時に一般化済み)
-- 元々 `src/video/h264.rs` に存在した avcC の `length_size_minus_one` 検証 (`parse_avcc_sps_pps_lists`) は、録画機能 (WebM リーダー) の削除に伴い削除された
+- 元々 `src/video/h264.rs` に存在した avcC の `length_size_minus_one` 検証 (`parse_avcc_sps_pps_lists`) は、録画機能 (WebM リーダー) の削除に伴い削除された (WebM CodecPrivate 専用パーサーで、 MP4 経路では `sample_entry` の `AvccBox` が使えるため再導入は不要)
 - hisui の MP4 出力は `NALU_HEADER_LENGTH = 4` 固定 (`src/video/h264.rs` の `AvccBox` 構築) のため、自分の出力を読む分には問題ないが、inspect が読み込む外部 MP4 では `lengthSizeMinusOne` が 0〜2 (1〜3 バイト長) のファイルも存在し得る
 
 ## 設計方針
