@@ -1,5 +1,27 @@
 # 外部由来のテストデータの出自
 
+## `h264-resolution-change.mp4` / `h265-resolution-change.mp4`
+
+単一 `stsd` + ビットストリーム内パラメータセット変化 (解像度変更) の回帰テスト用データ。
+VideoToolbox デコーダーがフレームデータ内の SPS/PPS/VPS 変化を追従できることを検証する。
+
+- **出所**: ffmpeg で生成した合成動画 (640x480 と 320x320 を concat)
+- **ライセンス**: なし (合成データ)
+- **生成コマンド** (ffmpeg):
+  ```
+  # H.264 (前半 640x480 と後半 320x320 を concat で結合する)
+  ffmpeg -f lavfi -i "color=c=blue:s=640x480:d=1:r=25" -c:v libx264 -preset ultrafast -profile:v baseline -pix_fmt yuv420p a.mp4
+  ffmpeg -f lavfi -i "color=c=red:s=320x320:d=1:r=25" -c:v libx264 -preset ultrafast -profile:v baseline -pix_fmt yuv420p b.mp4
+  printf "file 'a.mp4'\nfile 'b.mp4'\n" > list.txt
+  ffmpeg -f concat -safe 0 -i list.txt -c copy h264-resolution-change.mp4
+  # H.265 (hev1。repeat-headers=1 で各キーフレームに VPS/SPS/PPS を入れる)
+  ffmpeg -f lavfi -i "color=c=blue:s=640x480:d=1:r=25" -c:v libx265 -preset ultrafast -pix_fmt yuv420p -x265-params repeat-headers=1:bframes=0 a.mp4
+  ffmpeg -f lavfi -i "color=c=red:s=320x320:d=1:r=25" -c:v libx265 -preset ultrafast -pix_fmt yuv420p -x265-params repeat-headers=1:bframes=0 b.mp4
+  printf "file 'a.mp4'\nfile 'b.mp4'\n" > list.txt
+  ffmpeg -f concat -safe 0 -i list.txt -c copy h265-resolution-change.mp4
+  ```
+- 注意: H.265 は `bframes=0` が必須 (B フレームがあると MP4 リーダーが composition_time_offset でエラーになる)
+
 ## `speech-en-16k-mono-s16le.pcm` / `speech-ja-16k-mono-s16le.pcm`
 
 英語と日本語の短尺発話音声。

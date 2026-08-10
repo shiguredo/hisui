@@ -186,6 +186,96 @@ fn inspect_mp4_with_decode() -> noargs::Result<()> {
     Ok(())
 }
 
+/// 単一 stsd + ビットストリーム内パラメータセット変化 (ffmpeg concat 出力) の H.264 入力で、
+/// 全サンプルが VideoToolbox でデコードできることを確認する回帰テスト。
+///
+/// 修正前は後半の解像度変更で `status=-12909` が発生し、後半サンプルの
+/// `decoded_data_size` / `width` / `height` が欠落していた。
+#[test]
+#[cfg(target_os = "macos")]
+fn inspect_mp4_with_decode_h264_resolution_change() -> noargs::Result<()> {
+    let output =
+        run_hisui_command(&["inspect", "--decode", "testdata/h264-resolution-change.mp4"])?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("status=-12909"),
+        "VideoToolbox デコードエラー (status=-12909) が発生しないこと"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("Failed to parse inspect output JSON: {e}"))?;
+    let root = json.value();
+
+    let mut video_sample_count = 0;
+    for sample in root.to_member("video_samples")?.required()?.to_array()? {
+        video_sample_count += 1;
+        assert!(
+            sample.to_member("decoded_data_size")?.optional().is_some(),
+            "全サンプルに decoded_data_size が付くこと (sample #{video_sample_count})"
+        );
+        assert!(
+            sample.to_member("width")?.optional().is_some(),
+            "全サンプルに width が付くこと (sample #{video_sample_count})"
+        );
+        assert!(
+            sample.to_member("height")?.optional().is_some(),
+            "全サンプルに height が付くこと (sample #{video_sample_count})"
+        );
+    }
+
+    assert_eq!(
+        video_sample_count, 50,
+        "映像サンプル数 50 (回帰検出アンカー)"
+    );
+    Ok(())
+}
+
+/// 単一 stsd + in-band パラメータセット変化 (hev1) の H.265 入力で、
+/// 全サンプルが VideoToolbox でデコードできることを確認する回帰テスト。
+///
+/// 修正前は後半の解像度変更で `status=-12909` が発生し、後半サンプルの
+/// `decoded_data_size` / `width` / `height` が欠落していた。
+#[test]
+#[cfg(target_os = "macos")]
+fn inspect_mp4_with_decode_h265_resolution_change() -> noargs::Result<()> {
+    let output =
+        run_hisui_command(&["inspect", "--decode", "testdata/h265-resolution-change.mp4"])?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("status=-12909"),
+        "VideoToolbox デコードエラー (status=-12909) が発生しないこと"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("Failed to parse inspect output JSON: {e}"))?;
+    let root = json.value();
+
+    let mut video_sample_count = 0;
+    for sample in root.to_member("video_samples")?.required()?.to_array()? {
+        video_sample_count += 1;
+        assert!(
+            sample.to_member("decoded_data_size")?.optional().is_some(),
+            "全サンプルに decoded_data_size が付くこと (sample #{video_sample_count})"
+        );
+        assert!(
+            sample.to_member("width")?.optional().is_some(),
+            "全サンプルに width が付くこと (sample #{video_sample_count})"
+        );
+        assert!(
+            sample.to_member("height")?.optional().is_some(),
+            "全サンプルに height が付くこと (sample #{video_sample_count})"
+        );
+    }
+
+    assert_eq!(
+        video_sample_count, 50,
+        "映像サンプル数 50 (回帰検出アンカー)"
+    );
+    Ok(())
+}
+
 fn required_u64_member(value: nojson::RawJsonValue<'_, '_>, key: &str) -> noargs::Result<u64> {
     value
         .to_member(key)?
