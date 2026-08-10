@@ -3,7 +3,7 @@
 - Created: 2026-08-04
 - Completed:
 - Branch: feature/fix-videotoolbox-decoder-resolution-change
-- Polished:
+- Polished: 2026-08-10
 - Updated: 2026-08-10
 
 ## 目的
@@ -56,7 +56,7 @@
 - ログに `[shiguredo_video_toolbox] output_callback() failed: status=-12909` がちょうど 25 個 (欠落フレーム数と一致)
 - **プロセスは exit code 0 で成功終了** (hard error にならず silent frame drop)
 
-H.265 の `hev1` は未実測だが、`get_h265_vps_sps_pps` が `frame.sample_entry.hvcc_box` からしか読まない構造は同じで、in-band パラメータセット変化のある hev1 入力に対して同種の失敗が発生する。
+H.265 の `hev1` は 2026-08-10 に実機確認済み。`get_h265_vps_sps_pps` が `frame.sample_entry.hvcc_box` からしか読まない構造は同じで、in-band パラメータセット変化のある hev1 入力に対して H.264 と同種の失敗 (status=-12909 × 25) が発生する。なお H.265 の再現データは `ffmpeg -c:v libx265 -x265-params repeat-headers=1` で各キーフレームに VPS/SPS/PPS を入れてから concat する必要がある (デフォルトの concat では後半キーフレームに in-band パラメータセットが入らない)。
 
 ## 設計方針
 
@@ -65,14 +65,15 @@ H.265 の `hev1` は未実測だが、`get_h265_vps_sps_pps` が `frame.sample_e
 - `VideoFormat::H264` (AVCC): AVCC の length-prefix を辿って SPS (type 7) / PPS (type 8) NALU を抽出し、保持値と比較する。フレーム内に該当 NALU があればそれを優先、無ければ従来どおり `frame.sample_entry` にフォールバックする (`avc1` の仕様準拠入力向け)
 - `VideoFormat::H265` (AVCC): 同様に VPS (type 32) / SPS (type 33) / PPS (type 34) を抽出する。フォールバック方針も同じ (`hvc1` の仕様準拠入力向け)
 - `VideoFormat::H264AnnexB` は既にフレームデータから拾っているため変更なし
-- AVCC の length-prefix 走査による SPS/PPS/VPS 抽出は既存コードに無いため専用パーサの新設が必要 (`H264AnnexBNalUnits` / `H265AnnexBNalUnits` は Annex.B 専用、`parse_avcc_sps_pps_lists` は WebM リーダー削除 (issue 0090) で削除済み。参考実装は `src/decoder/nvcodec.rs` の `decode()` 内 length-prefix 走査)
+- AVCC の length-prefix 走査による SPS/PPS/VPS 抽出は既存コードに無いため専用パーサの新設が必要 (`H264AnnexBNalUnits` / `H265AnnexBNalUnits` は Annex.B 専用、`parse_avcc_sps_pps_lists` は WebM リーダー削除 (issue 0090) で削除済み)。NALU 長プレフィックスは既存デコーダーと同様に 4 バイト固定 (`NALU_HEADER_LENGTH`) で扱う
+- 先行実装の参考: `src/decoder/openh264.rs` の `build_annexb_input` は H.264 の AVCC length-prefix 走査で SPS/PPS を検出し、フレーム内に無ければ `sample_entry` の avcC から補完する既存実装 (H.265 の VPS/SPS/PPS 検出は無い)。NALU 長プレフィックスの走査自体は `src/decoder/nvcodec.rs` の `decode()` 内にも存在する (こちらは NAL タイプ検出を含まない)
 - H.265 の NALU 定数 (`H265_NALU_TYPE_VPS` / `H265_NALU_TYPE_SPS` / `H265_NALU_TYPE_PPS`) と `parse_sps` / `parse_hevc_sps` (EBSP から RBSP を抽出する既存実装) は現存するので活用する
 
 ## 完了条件
 
 - 上記の再現手順で作成する concat MP4 を `hisui inspect --decode` に渡したとき、後半 25 フレームにも `width` / `height` / `decoded_data_size` が付き、`output_callback() failed: status=-12909` のログが 0 件になること
-- H.265 についても hev1 で同等の再現データを作成し、正しくデコードできることを確認する
-- 上記の再現データをテストデータとして加え、`hisui inspect --decode` の JSON 出力で全サンプルに `width` / `height` が付くことを assert する回帰テストを追加すること (配置場所は既存の `testdata/` レイアウトに合わせる)
+- H.265 についても hev1 で同等の再現データを作成し、正しくデコードできることを確認する。なお H.265 の再現データは H.264 と同じ concat 手順では後半キーフレームに in-band VPS/SPS/PPS が入らないため、x265 エンコード時に `repeat-headers=1` を指定して各キーフレームに VPS/SPS/PPS を含めること
+- 上記の再現データをテストデータとして加え、`hisui inspect --decode` の JSON 出力で全サンプルに `width` / `height` が付くことを assert する回帰テストを追加すること (配置場所は既存の `testdata/` レイアウトに合わせる)。VideoToolbox は macOS 専用のため、このテストは macOS でのみ実行する (Linux CI には H.264 / H.265 のデコーダーエンジンが無く失敗する。既存の `tests/decoder_tests.rs` の `#[cfg(target_os = "macos")]` と同じ扱いとする)
 - 既存のテストが全て通ること
 
 ## 関連
