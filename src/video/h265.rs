@@ -5,7 +5,7 @@ use crate::video::{
 };
 
 // H.265 の NAL ユニット前に付与されるサイズのバイト数
-// Sora / Hisui が生成するものは全て 4 バイトなので固定値でいい（H.264と同様）
+// Hisui の MP4 出力は常に 4 バイトで書き出すため固定値でいい（H.264と同様）
 pub use crate::video::h264::NALU_HEADER_LENGTH;
 
 // H.265 の NAL ユニットタイプ

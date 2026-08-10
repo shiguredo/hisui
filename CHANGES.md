@@ -383,7 +383,6 @@
 - [CHANGE] legacy サブコマンドを削除する
   - Hisui 2025.1.x で提供されていた `hisui legacy` サブコマンドを削除
   - 代わりに `hisui compose` サブコマンドを使用すること
-  - 詳細は [マイグレーションガイド](./docs/migrate_hisui_legacy.md) を参照
   - @sile
 - [CHANGE] ビルド用 CUDA Toolkit のバージョンを 13.0.2 にする
   - @voluntas

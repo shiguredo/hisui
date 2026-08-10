@@ -54,7 +54,7 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
         .present_and_then(|a| a.value().parse())?;
     let input_file_path: PathBuf = noargs::arg("INPUT_FILE")
         .example("/path/to/archive.mp4")
-        .doc("情報取得対象の MP4 ファイル(.mp4)")
+        .doc("情報取得対象の MP4 ファイル (.mp4)")
         .take(args)
         .then(|a| a.value().parse())?;
 

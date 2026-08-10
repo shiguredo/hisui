@@ -93,7 +93,7 @@
   - [ ] `renderSkippedFrames`: レンダーでスキップしたフレーム数を返す（ 現状は `0` 固定 ）
   - [ ] `renderTotalFrames`: レンダー総フレーム数を返す（ 現状は `0` 固定 ）
   - [x] `outputSkippedFrames`: 出力でスキップしたフレーム数を返す
-    - NOTE: 現在アクティブな stream / record 出力の keyframe 待機ドロップ数を合算して返す
+    - NOTE: 現在アクティブな stream 出力の keyframe 待機ドロップ数を返す (record 出力は writer に drop 経路がないため常に 0)
   - [x] `outputTotalFrames`: 出力総フレーム数を返す
     - NOTE: 現在アクティブな stream / record 出力のフレーム数を合算して返す
   - [x] `webSocketSessionIncomingMessages`: 現在セッションの受信メッセージ数を返す

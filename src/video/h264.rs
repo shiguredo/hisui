@@ -6,7 +6,7 @@ use shiguredo_mp4::{
 use crate::video::{self, VideoFrameSize, bit_reader::BitReader};
 
 // H.264 の NAL ユニット前に付与されるサイズのバイト数
-// Sora / Hisui が生成するものは全て 4 バイトなので固定値でいい
+// Hisui の MP4 出力は常に 4 バイトで書き出すため固定値でいい
 pub const NALU_HEADER_LENGTH: usize = 4;
 
 // H.264 の NAL ユニットタイプ
@@ -412,18 +412,6 @@ pub fn h264_sample_entry_from_annexb(data: &[u8]) -> crate::Result<SampleEntry> 
     Ok(entry)
 }
 
-/// AVC1 サンプルエントリーから width, height を抽出
-pub fn extract_video_dimensions(entry: &SampleEntry) -> crate::Result<(u32, u32)> {
-    match entry {
-        SampleEntry::Avc1(avc1) => {
-            let width = avc1.visual.width as u32;
-            let height = avc1.visual.height as u32;
-            Ok((width, height))
-        }
-        _ => Err(crate::Error::new("Not an H.264 video sample entry")),
-    }
-}
-
 /// SPS バイト列から取り出した avcC 反映用フィールド群と解像度
 ///
 /// `parse_sps` の戻り値で、`h264_sample_entry_from_sps_pps_lists` 経由で
@@ -827,7 +815,8 @@ pub(crate) mod tests {
     // 先頭の SPS NAL を 2 個目の start code 直前まで切り出した。
     //
     // 各 SPS は本モジュール外のテスト (decoder/openh264.rs::tests, rtsp/subscriber.rs::tests,
-    // srt/inbound_endpoint.rs::tests) からも参照されるため `pub(crate)` で公開する。
+    // srt/inbound_endpoint.rs::tests, hls/writer.rs::tests, rtmp/frame.rs::tests) からも
+    // 参照されるため `pub(crate)` で公開する。
 
     // Baseline プロファイル + 320x240 (16 の倍数の解像度、crop なしの最小実機 SPS パターン)。
     // NAL ヘッダ (0x67) 直後の 3 バイトは profile_idc=66 (Baseline) / constraint_set_flags=0xc0 /
