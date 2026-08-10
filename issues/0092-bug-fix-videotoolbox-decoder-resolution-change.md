@@ -4,6 +4,7 @@
 - Completed:
 - Branch: feature/fix-videotoolbox-decoder-resolution-change
 - Polished:
+- Updated: 2026-08-10
 
 ## 目的
 
@@ -36,7 +37,7 @@
 - そのため単一 stsd で sample_entry が不変のまま bitstream 内 SPS/PPS だけが変わる入力では検知できず、後半のフレームが古い設定のデコーダーに渡って VideoToolbox が `status=-12909` を返す
 - `VideoFormat::H264AnnexB` 経路は `H264AnnexBNalUnits::new(&frame.data)` でフレームデータから直接 SPS/PPS を拾うため本問題は発生しない
 - VP9 / AV1 は `reinitialize_raw_codec_if_need` で解像度変化そのものを検知しているため本問題は発生しない
-- nvcodec (`src/decoder/nvcodec.rs`) はフレームデータを Annex.B 形式で NVDEC に渡すため inline パラメータセットを拾える可能性が高い (本 issue のスコープ外・要検証)
+- nvcodec (`src/decoder/nvcodec.rs`) はフレームデータを Annex.B 形式で NVDEC に渡すため inline パラメータセットを拾える可能性が高い (本 issue のスコープ外。追従の検証と対応は issue 0093 / 0094)
 
 ### 再現手順と実測結果 (2026-08-04, H.264 avc1 で確認)
 
@@ -64,7 +65,8 @@ H.265 の `hev1` は未実測だが、`get_h265_vps_sps_pps` が `frame.sample_e
 - `VideoFormat::H264` (AVCC): AVCC の length-prefix を辿って SPS (type 7) / PPS (type 8) NALU を抽出し、保持値と比較する。フレーム内に該当 NALU があればそれを優先、無ければ従来どおり `frame.sample_entry` にフォールバックする (`avc1` の仕様準拠入力向け)
 - `VideoFormat::H265` (AVCC): 同様に VPS (type 32) / SPS (type 33) / PPS (type 34) を抽出する。フォールバック方針も同じ (`hvc1` の仕様準拠入力向け)
 - `VideoFormat::H264AnnexB` は既にフレームデータから拾っているため変更なし
-- 既存の H.264 NALU パーサ (`crate::video::h264::parse_avcc_sps_pps_lists` 等) と H.265 の NALU 定数 (`H265_NALU_TYPE_VPS` / `H265_NALU_TYPE_SPS` / `H265_NALU_TYPE_PPS`) を活用し、専用のパーサを新設しない方向で検討する
+- AVCC の length-prefix 走査による SPS/PPS/VPS 抽出は既存コードに無いため専用パーサの新設が必要 (`H264AnnexBNalUnits` / `H265AnnexBNalUnits` は Annex.B 専用、`parse_avcc_sps_pps_lists` は WebM リーダー削除 (issue 0090) で削除済み。参考実装は `src/decoder/nvcodec.rs` の `decode()` 内 length-prefix 走査)
+- H.265 の NALU 定数 (`H265_NALU_TYPE_VPS` / `H265_NALU_TYPE_SPS` / `H265_NALU_TYPE_PPS`) と `parse_sps` / `parse_hevc_sps` (EBSP から RBSP を抽出する既存実装) は現存するので活用する
 
 ## 完了条件
 
@@ -76,3 +78,5 @@ H.265 の `hev1` は未実測だが、`get_h265_vps_sps_pps` が `frame.sample_e
 ## 関連
 
 - avc3 サポート追加 (in-band パラメータセットを正規に扱うが hisui 全体でハンドラが無い。本 issue のスコープ外)
+- nvcodec デコーダーの解像度変化追従 (issue 0093。本 issue と同じく sample_entry / パラメータセット変化の追従問題を nvcodec 側で扱う)
+- nvcodec デコーダーの `contains_parameter_sets` 全 NALU 走査化 (issue 0094)
