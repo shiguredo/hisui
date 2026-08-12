@@ -526,9 +526,10 @@ mod tests {
     const H265_PPS_320X320: &[u8] = &[0x44, 0x01, 0xc0, 0x71, 0x83, 0x12];
 
     // ffmpeg + libx264 で生成した実機 H.264 ストリームから抽出した SPS / PPS
-    // 生成コマンド: `ffmpeg -f lavfi -i color=c=blue:s=320x240:d=1:r=25 -c:v libx264 -profile:v baseline out.mp4`
+    // 生成コマンド: `ffmpeg -f lavfi -i color=c=blue:s=320x240:d=1:r=25 -c:v libx264 -profile:v baseline -qp 20 -f h264 out.h264`
+    // PPS は QP 違い (pic_init_qp_minus26) で sample_entry 側 (0x68 0xce 0x06 0xe2) と差別化する
     const H264_SPS_320X240: &[u8] = &crate::video::h264::tests::SPS_320X240;
-    const H264_PPS_320X240: &[u8] = &[0x68, 0xce, 0x06, 0xe2];
+    const H264_PPS_320X240: &[u8] = &[0x68, 0xce, 0x06, 0xf2];
 
     fn make_video_frame(
         format: VideoFormat,
@@ -674,7 +675,8 @@ mod tests {
             "sample_entry の SPS にフォールバックすること"
         );
         assert_eq!(
-            pps, H264_PPS_320X240,
+            pps,
+            &[0x68, 0xce, 0x06, 0xe2][..],
             "sample_entry の PPS にフォールバックすること"
         );
         Ok(())
