@@ -81,3 +81,9 @@ H.265 の `hev1` は 2026-08-10 に実機確認済み。`get_h265_vps_sps_pps` �
 - avc3 サポート追加 (in-band パラメータセットを正規に扱うが hisui 全体でハンドラが無い。本 issue のスコープ外)
 - nvcodec デコーダーの解像度変化追従 (issue 0093。本 issue と同じく sample_entry / パラメータセット変化の追従問題を nvcodec 側で扱う)
 - nvcodec デコーダーの `contains_parameter_sets` 全 NALU 走査化 (issue 0094)
+
+## 残存する懸念 (2026-08-10 の判断)
+
+SPS / PPS / VPS は NALU タイプごとに独立してフォールバックするため、キーフレームがパラメータセットの**一部のみ**を in-band に含む入力 (例: H.265 で VPS のみ in-band なし、SPS / PPS のみ in-band) では、新旧混在セットで再初期化が走り得る。混在セットで VideoToolbox の初期化が失敗した場合、Err は `reinitialize_if_need` の `if let Ok` の外 (`*self = Self::new_h265(...)?`) から伝播し、パイプライン全体が停止する。また、キーフレーム間で in-band 有無が不均一な入力では、旧 (sample_entry) と新 (in-band) の間で再初期化が往復するフラップが発生し得る。
+
+ただし、主要エンコーダ (x264 / x265 / VideoToolbox / NVENC) はパラメータセットをセットで出力するため、実データでは混在ケースは確認されていない。2026-08-10 のレビュー時点で、**エラー扱いのまま維持する**と判断した (実際に混在ケースに遭遇したら、その時点で混在セットの検出と再初期化スキップ等の対応を検討する)。
