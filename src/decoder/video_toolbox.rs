@@ -588,15 +588,30 @@ mod tests {
     #[test]
     fn extract_h264_sps_pps_from_avcc_returns_err_on_truncated_nalu() {
         // NALU 長がデータ末尾を超える場合は Err を返すこと
-        let data = avcc_data(&[H264_SPS_320X240, &[0x65, 0x88]]);
-        let truncated = [&data[..], &[0xffu8][..]].concat();
         let mut data = Vec::new();
         // 本来の SPS 長より大きい NALU 長を持つ不正データを構築する
         data.extend_from_slice(&(H264_SPS_320X240.len() as u32 + 10).to_be_bytes());
         data.extend_from_slice(H264_SPS_320X240);
         assert!(extract_h264_sps_pps_from_avcc(&data).is_err());
-        // 上記の truncated データ自体は末尾 1 バイトが不完全な長さヘッダになる
-        assert!(extract_h264_sps_pps_from_avcc(&truncated).is_err());
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_skips_zero_length_nalu() -> crate::Result<()> {
+        // ゼロ長 NALU が混在しても SPS / PPS を抽出できること (無限ループ回帰の検出)
+        let data = avcc_data(&[&[], H264_SPS_320X240, &[], H264_PPS_320X240]);
+        let in_frame = extract_h264_sps_pps_from_avcc(&data)?;
+        assert_eq!(in_frame.sps, Some(H264_SPS_320X240), "SPS が抽出されること");
+        assert_eq!(in_frame.pps, Some(H264_PPS_320X240), "PPS が抽出されること");
+        Ok(())
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_returns_none_on_empty_data() -> crate::Result<()> {
+        // 空のフレームデータでは SPS / PPS が None になること
+        let in_frame = extract_h264_sps_pps_from_avcc(&[])?;
+        assert_eq!(in_frame.sps, None, "SPS が無い場合は None");
+        assert_eq!(in_frame.pps, None, "PPS が無い場合は None");
+        Ok(())
     }
 
     #[test]
@@ -634,6 +649,41 @@ mod tests {
         data.extend_from_slice(&(H265_VPS_640X480.len() as u32 + 10).to_be_bytes());
         data.extend_from_slice(H265_VPS_640X480);
         assert!(extract_h265_vps_sps_pps_from_avcc(&data).is_err());
+    }
+
+    #[test]
+    fn extract_h265_vps_sps_pps_from_avcc_returns_err_on_truncated_length_header() {
+        // 長さプレフィックスがデータ末尾を超える場合は Err を返すこと
+        let data = vec![0x00, 0x00];
+        assert!(extract_h265_vps_sps_pps_from_avcc(&data).is_err());
+    }
+
+    #[test]
+    fn extract_h265_vps_sps_pps_from_avcc_skips_zero_length_nalu() -> crate::Result<()> {
+        // ゼロ長 NALU が混在しても VPS / SPS / PPS を抽出できること (無限ループ回帰の検出)
+        let data = avcc_data(&[
+            &[],
+            H265_VPS_640X480,
+            &[],
+            H265_SPS_640X480,
+            &[],
+            H265_PPS_640X480,
+        ]);
+        let in_frame = extract_h265_vps_sps_pps_from_avcc(&data)?;
+        assert_eq!(in_frame.vps, Some(H265_VPS_640X480), "VPS が抽出されること");
+        assert_eq!(in_frame.sps, Some(H265_SPS_640X480), "SPS が抽出されること");
+        assert_eq!(in_frame.pps, Some(H265_PPS_640X480), "PPS が抽出されること");
+        Ok(())
+    }
+
+    #[test]
+    fn extract_h265_vps_sps_pps_from_avcc_returns_none_on_empty_data() -> crate::Result<()> {
+        // 空のフレームデータでは VPS / SPS / PPS が None になること
+        let in_frame = extract_h265_vps_sps_pps_from_avcc(&[])?;
+        assert_eq!(in_frame.vps, None, "VPS が無い場合は None");
+        assert_eq!(in_frame.sps, None, "SPS が無い場合は None");
+        assert_eq!(in_frame.pps, None, "PPS が無い場合は None");
+        Ok(())
     }
 
     #[test]
@@ -684,6 +734,63 @@ mod tests {
             "sample_entry の PPS にフォールバックすること"
         );
         Ok(())
+    }
+
+    #[test]
+    fn get_h264_sps_pps_mixes_frame_sps_and_sample_entry_pps() -> crate::Result<()> {
+        // フレームデータ内に SPS のみ存在し、PPS は sample_entry の avcC にフォールバックすること
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
+            &[
+                &crate::video::h264::tests::SPS_1920X1080_ANNEXB[..],
+                &[0, 0, 0, 1, 0x68, 0xce, 0x06, 0xe2][..],
+            ]
+            .concat(),
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H264,
+            avcc_data(&[H264_SPS_320X240, &[0x65, 0x88]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (sps, pps) = get_h264_sps_pps(&frame)?;
+        assert_eq!(sps, H264_SPS_320X240, "フレーム内の SPS が優先されること");
+        assert_eq!(
+            pps,
+            &[0x68, 0xce, 0x06, 0xe2][..],
+            "PPS は sample_entry にフォールバックすること"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn get_h264_sps_pps_mixes_frame_pps_and_sample_entry_sps() -> crate::Result<()> {
+        // フレームデータ内に PPS のみ存在し、SPS は sample_entry の avcC にフォールバックすること
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
+            &[
+                &crate::video::h264::tests::SPS_1920X1080_ANNEXB[..],
+                &[0, 0, 0, 1, 0x68, 0xce, 0x06, 0xe2][..],
+            ]
+            .concat(),
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H264,
+            avcc_data(&[H264_PPS_320X240, &[0x65, 0x88]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (sps, pps) = get_h264_sps_pps(&frame)?;
+        assert_eq!(
+            sps,
+            crate::video::h264::tests::SPS_1920X1080,
+            "SPS は sample_entry にフォールバックすること"
+        );
+        assert_eq!(pps, H264_PPS_320X240, "フレーム内の PPS が優先されること");
+        Ok(())
+    }
+
+    #[test]
+    fn get_h264_sps_pps_returns_err_without_sample_entry() {
+        // sample_entry が無い場合は Err を返すこと
+        let frame = make_video_frame(VideoFormat::H264, avcc_data(&[&[0x65, 0x88]]), None);
+        assert!(get_h264_sps_pps(&frame).is_err());
     }
 
     #[test]
@@ -754,5 +861,75 @@ mod tests {
             "sample_entry の PPS にフォールバックすること"
         );
         Ok(())
+    }
+
+    #[test]
+    fn get_h265_vps_sps_pps_mixes_frame_vps_sps_and_sample_entry_pps() -> crate::Result<()> {
+        // フレームデータ内に VPS / SPS のみ存在し、PPS は sample_entry の hvcc にフォールバックすること
+        let sample_entry = crate::video::h265::h265_sample_entry_from_annexb(
+            &[
+                &[0, 0, 0, 1][..],
+                H265_VPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_SPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_PPS_640X480,
+            ]
+            .concat(),
+            crate::video::FrameRate::FPS_30,
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H265,
+            avcc_data(&[H265_VPS_320X320, H265_SPS_320X320, &[0x26, 0x01]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (vps, sps, pps) = get_h265_vps_sps_pps(&frame)?;
+        assert_eq!(vps, H265_VPS_320X320, "フレーム内の VPS が優先されること");
+        assert_eq!(sps, H265_SPS_320X320, "フレーム内の SPS が優先されること");
+        assert_eq!(
+            pps, H265_PPS_640X480,
+            "PPS は sample_entry にフォールバックすること"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn get_h265_vps_sps_pps_mixes_frame_pps_and_sample_entry_vps_sps() -> crate::Result<()> {
+        // フレームデータ内に PPS のみ存在し、VPS / SPS は sample_entry の hvcc にフォールバックすること
+        let sample_entry = crate::video::h265::h265_sample_entry_from_annexb(
+            &[
+                &[0, 0, 0, 1][..],
+                H265_VPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_SPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_PPS_640X480,
+            ]
+            .concat(),
+            crate::video::FrameRate::FPS_30,
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H265,
+            avcc_data(&[H265_PPS_320X320, &[0x26, 0x01]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (vps, sps, pps) = get_h265_vps_sps_pps(&frame)?;
+        assert_eq!(
+            vps, H265_VPS_640X480,
+            "VPS は sample_entry にフォールバックすること"
+        );
+        assert_eq!(
+            sps, H265_SPS_640X480,
+            "SPS は sample_entry にフォールバックすること"
+        );
+        assert_eq!(pps, H265_PPS_320X320, "フレーム内の PPS が優先されること");
+        Ok(())
+    }
+
+    #[test]
+    fn get_h265_vps_sps_pps_returns_err_without_sample_entry() {
+        // sample_entry が無い場合は Err を返すこと
+        let frame = make_video_frame(VideoFormat::H265, avcc_data(&[&[0x26, 0x01]]), None);
+        assert!(get_h265_vps_sps_pps(&frame).is_err());
     }
 }
