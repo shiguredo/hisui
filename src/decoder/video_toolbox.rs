@@ -511,6 +511,20 @@ mod tests {
     ];
     const H265_PPS_640X480: &[u8] = &[0x44, 0x01, 0xc0, 0x73, 0xc1, 0x89];
 
+    // ffmpeg + libx265 で生成した実機 H.265 ストリームから抽出した VPS / SPS / PPS (320x320)
+    // 生成コマンド: `ffmpeg -f lavfi -i color=c=red:s=320x320:d=1:r=25 -c:v libx265 -qp 40 -x265-params repeat-headers=1:bframes=0 out.mp4`
+    // PPS は QP 違い (init_qp_minus26) で 640x480 側と差別化する
+    const H265_VPS_320X320: &[u8] = &[
+        0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00,
+        0x03, 0x00, 0x00, 0x03, 0x00, 0x3c, 0xba, 0x02, 0x40,
+    ];
+    const H265_SPS_320X320: &[u8] = &[
+        0x42, 0x01, 0x01, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00, 0x03, 0x00, 0x00,
+        0x03, 0x00, 0x3c, 0xa0, 0x0a, 0x08, 0x05, 0x05, 0x96, 0xe9, 0x29, 0x30, 0xbc, 0x05, 0xa0,
+        0x20, 0x00, 0x00, 0x03, 0x00, 0x20, 0x00, 0x00, 0x03, 0x03, 0x21,
+    ];
+    const H265_PPS_320X320: &[u8] = &[0x44, 0x01, 0xc0, 0x71, 0x83, 0x12];
+
     // ffmpeg + libx264 で生成した実機 H.264 ストリームから抽出した SPS / PPS
     // 生成コマンド: `ffmpeg -f lavfi -i color=c=blue:s=320x240:d=1:r=25 -c:v libx264 -profile:v baseline out.mp4`
     const H264_SPS_320X240: &[u8] = &crate::video::h264::tests::SPS_320X240;
@@ -669,6 +683,8 @@ mod tests {
     #[test]
     fn get_h265_vps_sps_pps_prefers_parameter_sets_in_frame() -> crate::Result<()> {
         // フレームデータ内の VPS / SPS / PPS が sample_entry の hvcc より優先されること
+        // sample_entry には 640x480、フレームデータ内には 320x320 (QP 違いで PPS も差別化) を入れ、
+        // 優先順位を値の違いで検出できるようにする
         let sample_entry = crate::video::h265::h265_sample_entry_from_annexb(
             &[
                 &[0, 0, 0, 1][..],
@@ -684,17 +700,17 @@ mod tests {
         let frame = make_video_frame(
             VideoFormat::H265,
             avcc_data(&[
-                H265_VPS_640X480,
-                H265_SPS_640X480,
-                H265_PPS_640X480,
+                H265_VPS_320X320,
+                H265_SPS_320X320,
+                H265_PPS_320X320,
                 &[0x26, 0x01],
             ]),
             Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
         );
         let (vps, sps, pps) = get_h265_vps_sps_pps(&frame)?;
-        assert_eq!(vps, H265_VPS_640X480, "フレーム内の VPS が優先されること");
-        assert_eq!(sps, H265_SPS_640X480, "フレーム内の SPS が優先されること");
-        assert_eq!(pps, H265_PPS_640X480, "フレーム内の PPS が優先されること");
+        assert_eq!(vps, H265_VPS_320X320, "フレーム内の VPS が優先されること");
+        assert_eq!(sps, H265_SPS_320X320, "フレーム内の SPS が優先されること");
+        assert_eq!(pps, H265_PPS_320X320, "フレーム内の PPS が優先されること");
         Ok(())
     }
 
