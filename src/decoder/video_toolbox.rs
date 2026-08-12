@@ -336,8 +336,10 @@ struct H265VpsSpsPpsFromAvcc<'a> {
 
 /// AVCC 形式の H.264 フレームデータから SPS / PPS NALU を抽出する
 ///
-/// NALU 長プレフィックスは 4 バイト固定 (`NALU_HEADER_LENGTH`) で、
+/// NALU 長プレフィックスは 4 バイト固定 (ISO/IEC 14496-15 §5.3.3.1 の
+/// `lengthSizeMinusOne` が 3 の場合。既存デコーダーも 4 バイト固定で扱う) で、
 /// フレーム内に SPS / PPS が無い場合は `None` を返す。
+/// NAL unit type は ITU-T H.264 仕様 7.4.1 の nal_unit_type (下位 5 ビット) で判定する。
 /// フレームデータが壊れている場合 (長さプレフィックスがデータ末尾を超える) は Err を返す。
 fn extract_h264_sps_pps_from_avcc(data: &[u8]) -> crate::Result<H264SpsPpsFromAvcc<'_>> {
     let mut sps = None;
@@ -379,8 +381,10 @@ fn extract_h264_sps_pps_from_avcc(data: &[u8]) -> crate::Result<H264SpsPpsFromAv
 
 /// AVCC 形式の H.265 フレームデータから VPS / SPS / PPS NALU を抽出する
 ///
-/// NALU 長プレフィックスは 4 バイト固定 (`NALU_HEADER_LENGTH`) で、
+/// NALU 長プレフィックスは 4 バイト固定 (ISO/IEC 14496-15 §8.3.3.1 の
+/// `lengthSizeMinusOne` が 3 の場合。既存デコーダーも 4 バイト固定で扱う) で、
 /// フレーム内に VPS / SPS / PPS が無い場合はそれぞれ `None` を返す。
+/// NAL unit type は ITU-T H.265 仕様 7.3.1.2 の nal_unit_type (第 1 バイトの bit 1-6) で判定する。
 /// フレームデータが壊れている場合 (長さプレフィックスがデータ末尾を超える) は Err を返す。
 fn extract_h265_vps_sps_pps_from_avcc(data: &[u8]) -> crate::Result<H265VpsSpsPpsFromAvcc<'_>> {
     let mut vps = None;
