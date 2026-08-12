@@ -806,7 +806,11 @@ pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> crate::Result<Vec
 /// AVCC 形式のフレームデータから抽出した SPS / PPS NALU
 ///
 /// フレーム内に該当 NALU が無い場合は `None` となる。
+///
+/// 現在の利用箇所は macOS 限定の VideoToolbox デコーダーのみのため、
+/// macOS 以外のビルドでは未使用 (dead code) になる。
 #[derive(Debug)]
+#[cfg_attr(not(target_os = "macos"), expect(dead_code))]
 pub(crate) struct H264SpsPpsFromAvcc<'a> {
     pub(crate) sps: Option<&'a [u8]>,
     pub(crate) pps: Option<&'a [u8]>,
@@ -817,8 +821,14 @@ pub(crate) struct H264SpsPpsFromAvcc<'a> {
 /// NALU 長プレフィックスは 4 バイト固定 (ISO/IEC 14496-15 §5.3.3.1 の
 /// `lengthSizeMinusOne` が 3 の場合。既存デコーダーも 4 バイト固定で扱う) で、
 /// フレーム内に SPS / PPS が無い場合は `None` を返す。
+/// 同一タイプの NALU が複数ある場合は最後の NALU が採用される (sample_entry 側の
+/// `sps_list.first()` / `pps_list.first()` とは選択規則が異なる)。
 /// NAL unit type は ITU-T H.264 仕様 7.4.1 の nal_unit_type (下位 5 ビット) で判定する。
 /// フレームデータが壊れている場合 (長さプレフィックスがデータ末尾を超える) は Err を返す。
+///
+/// 現在の利用箇所は macOS 限定の VideoToolbox デコーダーのみのため、
+/// macOS 以外のビルドでは未使用 (dead code) になる。
+#[cfg_attr(not(target_os = "macos"), expect(dead_code))]
 pub(crate) fn extract_h264_sps_pps_from_avcc(data: &[u8]) -> crate::Result<H264SpsPpsFromAvcc<'_>> {
     let mut sps = None;
     let mut pps = None;

@@ -21,7 +21,7 @@ fn inspect_mp4_without_decode() -> noargs::Result<()> {
     let output = run_hisui_command(&["inspect", "testdata/archive-red-320x320-vp9.mp4"])?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json = nojson::RawJson::parse(&stdout)
-        .map_err(|e| format!("Failed to parse inspect output JSON: {e}"))?;
+        .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
 
     let root = json.value();
     assert_eq!(
@@ -152,7 +152,7 @@ fn inspect_mp4_with_decode() -> noargs::Result<()> {
     ])?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json = nojson::RawJson::parse(&stdout)
-        .map_err(|e| format!("Failed to parse inspect output JSON: {e}"))?;
+        .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
 
     let root = json.value();
     assert_eq!(
@@ -204,7 +204,7 @@ fn inspect_mp4_with_decode_h264_resolution_change() -> noargs::Result<()> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json = nojson::RawJson::parse(&stdout)
-        .map_err(|e| format!("Failed to parse inspect output JSON: {e}"))?;
+        .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
     let root = json.value();
 
     let mut video_sample_count = 0;
@@ -251,7 +251,7 @@ fn inspect_mp4_with_decode_h265_resolution_change() -> noargs::Result<()> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json = nojson::RawJson::parse(&stdout)
-        .map_err(|e| format!("Failed to parse inspect output JSON: {e}"))?;
+        .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
     let root = json.value();
 
     let mut video_sample_count = 0;
