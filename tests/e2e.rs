@@ -208,25 +208,27 @@ fn inspect_mp4_with_decode_h264_resolution_change() -> noargs::Result<()> {
     let root = json.value();
 
     let mut video_sample_count = 0;
+    let mut decoded_320x320_count = 0;
     for sample in root.to_member("video_samples")?.required()?.to_array()? {
         video_sample_count += 1;
         assert!(
             sample.to_member("decoded_data_size")?.optional().is_some(),
             "全サンプルに decoded_data_size が付くこと (sample #{video_sample_count})"
         );
-        assert!(
-            sample.to_member("width")?.optional().is_some(),
-            "全サンプルに width が付くこと (sample #{video_sample_count})"
-        );
-        assert!(
-            sample.to_member("height")?.optional().is_some(),
-            "全サンプルに height が付くこと (sample #{video_sample_count})"
-        );
+        let width = required_u64_member(sample, "width")?;
+        let height = required_u64_member(sample, "height")?;
+        if width == 320 && height == 320 {
+            decoded_320x320_count += 1;
+        }
     }
 
     assert_eq!(
         video_sample_count, 50,
         "映像サンプル数 50 (回帰検出アンカー)"
+    );
+    assert_eq!(
+        decoded_320x320_count, 25,
+        "後半 25 サンプルが 320x320 でデコードされること (回帰検出アンカー)"
     );
     Ok(())
 }
@@ -253,25 +255,27 @@ fn inspect_mp4_with_decode_h265_resolution_change() -> noargs::Result<()> {
     let root = json.value();
 
     let mut video_sample_count = 0;
+    let mut decoded_320x320_count = 0;
     for sample in root.to_member("video_samples")?.required()?.to_array()? {
         video_sample_count += 1;
         assert!(
             sample.to_member("decoded_data_size")?.optional().is_some(),
             "全サンプルに decoded_data_size が付くこと (sample #{video_sample_count})"
         );
-        assert!(
-            sample.to_member("width")?.optional().is_some(),
-            "全サンプルに width が付くこと (sample #{video_sample_count})"
-        );
-        assert!(
-            sample.to_member("height")?.optional().is_some(),
-            "全サンプルに height が付くこと (sample #{video_sample_count})"
-        );
+        let width = required_u64_member(sample, "width")?;
+        let height = required_u64_member(sample, "height")?;
+        if width == 320 && height == 320 {
+            decoded_320x320_count += 1;
+        }
     }
 
     assert_eq!(
         video_sample_count, 50,
         "映像サンプル数 50 (回帰検出アンカー)"
+    );
+    assert_eq!(
+        decoded_320x320_count, 25,
+        "後半 25 サンプルが 320x320 でデコードされること (回帰検出アンカー)"
     );
     Ok(())
 }
