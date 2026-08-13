@@ -10,6 +10,10 @@ VideoToolbox デコーダーがフレームデータ内の SPS/PPS/VPS 変化を
 - **生成コマンド** (ffmpeg):
   ```
   # H.264 (前半 640x480 と後半 320x320 を concat で結合する)
+  # 後半キーフレームに in-band SPS/PPS が入るのは、x264 がストリーム開始時に SPS/PPS を
+  # 置き、concat の h264_mp4toannexb がキーフレームへ挿入するため (明示指定なし)。
+  # この前提が崩れると回帰テストがデータ原因で失敗するため、再生成時は必ず
+  # hisui inspect --decode で後半キーフレームに SPS(7) + PPS(8) が含まれることを確認する。
   ffmpeg -f lavfi -i "color=c=blue:s=640x480:d=1:r=25" -c:v libx264 -preset ultrafast -profile:v baseline -pix_fmt yuv420p a.mp4
   ffmpeg -f lavfi -i "color=c=red:s=320x320:d=1:r=25" -c:v libx264 -preset ultrafast -profile:v baseline -pix_fmt yuv420p b.mp4
   printf "file 'a.mp4'\nfile 'b.mp4'\n" > list.txt
