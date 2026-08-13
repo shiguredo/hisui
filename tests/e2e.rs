@@ -214,6 +214,10 @@ fn inspect_mp4_with_decode_h265_resolution_change() -> noargs::Result<()> {
 ///
 /// `assert_inspect_format_and_codec` で codec をピン留めし、テストデータの取り違え
 /// (H.264 用テストに H.265 データを渡す等) を早期に検出する。
+///
+/// 呼び出し元が 2 つとも macOS 限定のため、このヘルパーも同じ cfg でガードする。
+/// ガードしないと他 OS の clippy (--all-targets) で dead_code エラーになる。
+#[cfg(target_os = "macos")]
 fn assert_resolution_change_inspect_ok(path: &str, expected_codec: &str) -> noargs::Result<()> {
     let output = run_hisui_command(&["inspect", "--decode", path])?;
     let stderr = String::from_utf8_lossy(&output.stderr);
