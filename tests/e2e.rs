@@ -194,43 +194,7 @@ fn inspect_mp4_with_decode() -> noargs::Result<()> {
 #[test]
 #[cfg(target_os = "macos")]
 fn inspect_mp4_with_decode_h264_resolution_change() -> noargs::Result<()> {
-    let output =
-        run_hisui_command(&["inspect", "--decode", "testdata/h264-resolution-change.mp4"])?;
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("status=-12909"),
-        "VideoToolbox デコードエラー (status=-12909) が発生しないこと"
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let json = nojson::RawJson::parse(&stdout)
-        .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
-    let root = json.value();
-
-    let mut video_sample_count = 0;
-    let mut decoded_320x320_count = 0;
-    for sample in root.to_member("video_samples")?.required()?.to_array()? {
-        video_sample_count += 1;
-        assert!(
-            sample.to_member("decoded_data_size")?.optional().is_some(),
-            "全サンプルに decoded_data_size が付くこと (sample #{video_sample_count})"
-        );
-        let width = required_u64_member(sample, "width")?;
-        let height = required_u64_member(sample, "height")?;
-        if width == 320 && height == 320 {
-            decoded_320x320_count += 1;
-        }
-    }
-
-    assert_eq!(
-        video_sample_count, 50,
-        "映像サンプル数 50 (回帰検出アンカー)"
-    );
-    assert_eq!(
-        decoded_320x320_count, 25,
-        "後半 25 サンプルが 320x320 でデコードされること (回帰検出アンカー)"
-    );
-    Ok(())
+    assert_resolution_change_inspect_ok("testdata/h264-resolution-change.mp4", "H264")
 }
 
 /// 単一 stsd + in-band パラメータセット変化 (hev1) の H.265 入力で、
@@ -241,8 +205,17 @@ fn inspect_mp4_with_decode_h264_resolution_change() -> noargs::Result<()> {
 #[test]
 #[cfg(target_os = "macos")]
 fn inspect_mp4_with_decode_h265_resolution_change() -> noargs::Result<()> {
-    let output =
-        run_hisui_command(&["inspect", "--decode", "testdata/h265-resolution-change.mp4"])?;
+    assert_resolution_change_inspect_ok("testdata/h265-resolution-change.mp4", "H265")
+}
+
+/// 単一 stsd + ビットストリーム内パラメータセット変化の MP4 を VideoToolbox で
+/// デコードし、全サンプルに `decoded_data_size` / `width` / `height` が付くことと、
+/// 後半 25 サンプルが 320x320 でデコードされることを確認する共通ヘルパー。
+///
+/// `assert_inspect_format_and_codec` で codec をピン留めし、テストデータの取り違え
+/// (H.264 用テストに H.265 データを渡す等) を早期に検出する。
+fn assert_resolution_change_inspect_ok(path: &str, expected_codec: &str) -> noargs::Result<()> {
+    let output = run_hisui_command(&["inspect", "--decode", path])?;
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !stderr.contains("status=-12909"),
@@ -250,6 +223,7 @@ fn inspect_mp4_with_decode_h265_resolution_change() -> noargs::Result<()> {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_inspect_format_and_codec(&stdout, "mp4", None, Some(expected_codec))?;
     let json = nojson::RawJson::parse(&stdout)
         .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
     let root = json.value();
