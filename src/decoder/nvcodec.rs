@@ -163,13 +163,16 @@ impl NvcodecDecoder {
         }
 
         // サンプルエントリーからパラメータセットを抽出してキャッシュ
-        if self.parameter_sets.is_none()
-            && let Some(sample_entry) = &frame.sample_entry
-        {
-            self.parameter_sets = Some(extract_parameter_sets_annexb(
-                sample_entry.get(),
-                frame.format,
-            )?);
+        //
+        // develop の MP4 reader (`src/mp4/sync_reader.rs`) は全フレームに sample_entry を
+        // 付与するため、抽出結果が前回値と変化したときのみキャッシュを更新する。
+        // これにより解像度変化などで sample_entry が更新された場合に古い VPS / SPS / PPS を
+        // frame data に prepend し続けないようにしつつ、毎フレームの再抽出を避ける。
+        if let Some(sample_entry) = &frame.sample_entry {
+            let parameter_sets = extract_parameter_sets_annexb(sample_entry.get(), frame.format)?;
+            if self.parameter_sets.as_ref() != Some(&parameter_sets) {
+                self.parameter_sets = Some(parameter_sets);
+            }
         }
 
         let data = if matches!(
