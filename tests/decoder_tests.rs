@@ -2,6 +2,7 @@ use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
     mp4::sync_reader::Mp4VideoReader,
+    types::EngineName,
     video::VideoFrame,
 };
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
@@ -229,6 +230,70 @@ where
 
     Ok(())
 }
+
+/// 1 トラック内でキーフレーム毎に解像度が変わる多エントリ stsd の MP4 を nvcodec デコーダーで
+/// デコードし、sample_entry 変化に伴う parameter_sets キャッシュ更新が働くことを検証する。
+///
+/// 修正前は `NvcodecDecoder` が parameter_sets を初回のみキャッシュしていたため、
+/// sample_entry の変化を検出できず、後半の解像度変化で古い VPS / SPS / PPS を frame data に
+/// prepend し続けてデコード結果が壊れていた。
+#[test]
+#[cfg(feature = "nvcodec")]
+fn h264_single_track_resolution_change_nvcodec() -> hisui::Result<()> {
+    if !shiguredo_nvcodec::is_cuda_library_available() {
+        eprintln!("skip: CUDA ライブラリが利用できない");
+        return Ok(());
+    }
+
+    let reader = Mp4VideoReader::new("testdata/archive-h264-resolution-change.mp4")?;
+    let mut input_frames = Vec::new();
+    for input_frame in reader {
+        input_frames.push(input_frame?);
+    }
+
+    let options = VideoDecoderOptions {
+        openh264_lib: None,
+        decode_params: Default::default(),
+        engines: Some(vec![EngineName::Nvcodec]),
+    };
+    let output_frames = decode_video_frames_with_pipeline(input_frames, options)?;
+    assert_expected_resolution_sequence(&output_frames);
+    Ok(())
+}
+
+/// 出力フレームの解像度シーケンスが期待どおりか確認する共通ヘルパー。
+///
+/// テストデータ (archive-h264-resolution-change.mp4) は 15 fps × 3 秒 = 45 フレームで、
+/// キーフレームが frame 0 / 15 / 30 にある:
+/// - frame 0..15  → 320x240
+/// - frame 15..30 → 224x160
+/// - frame 30..45 → 320x240
+fn assert_expected_resolution_sequence(output_frames: &[VideoFrame]) {
+    let expected: Vec<(usize, usize)> = (0..15)
+        .map(|_| (320, 240))
+        .chain((0..15).map(|_| (224, 160)))
+        .chain((0..15).map(|_| (320, 240)))
+        .collect();
+
+    assert_eq!(
+        output_frames.len(),
+        expected.len(),
+        "出力フレーム数が想定と異なる (回帰検出アンカー)"
+    );
+    for (i, (frame, (expected_width, expected_height))) in
+        output_frames.iter().zip(expected.iter()).enumerate()
+    {
+        let size = frame
+            .size()
+            .expect("デコード済みフレームは size を持つはず");
+        assert_eq!(
+            (size.width, size.height),
+            (*expected_width, *expected_height),
+            "フレーム {i} の解像度が期待値と一致しない"
+        );
+    }
+}
+
 #[test]
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 fn aac_decode() -> hisui::Result<()> {
