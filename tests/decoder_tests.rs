@@ -1,8 +1,9 @@
+#[cfg(feature = "nvcodec")]
+use hisui::types::EngineName;
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
     mp4::sync_reader::Mp4VideoReader,
-    types::EngineName,
     video::VideoFrame,
 };
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
@@ -268,6 +269,7 @@ fn h264_single_track_resolution_change_nvcodec() -> hisui::Result<()> {
 /// - frame 0..15  → 320x240
 /// - frame 15..30 → 224x160
 /// - frame 30..45 → 320x240
+#[cfg(feature = "nvcodec")]
 fn assert_expected_resolution_sequence(output_frames: &[VideoFrame]) {
     let expected: Vec<(usize, usize)> = (0..15)
         .map(|_| (320, 240))
