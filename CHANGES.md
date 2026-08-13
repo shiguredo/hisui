@@ -253,6 +253,10 @@
   - publish していたトラックが EOS 未送信のまま終了した場合に、購読側へ EOS を伝えて停止できるようにする
   - inspect は processor が異常終了した場合に非ゼロ終了コードで終了するようにする
   - @sile
+- [FIX] VideoToolbox デコーダーで、単一 stsd の MP4 内でビットストリーム内パラメータセット (SPS / PPS / VPS) が変化する入力 (ffmpeg concat 出力等) の解像度変更を追従できない問題を修正する
+  - フレームデータ (AVCC 形式) 内の SPS / PPS / VPS を検出して再初期化判定に使うようにする
+  - フレーム内に該当 NALU が無い場合は従来どおり sample_entry にフォールバックする
+  - @sile
 
 ### misc
 

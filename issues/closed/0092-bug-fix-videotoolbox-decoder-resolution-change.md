@@ -1,7 +1,7 @@
 # VideoToolbox デコーダーで 1 つの MP4 内の解像度変更をデコードできない問題を修正する
 
 - Created: 2026-08-04
-- Completed:
+- Completed: 2026-08-13
 - Branch: feature/fix-videotoolbox-decoder-resolution-change
 - Polished: 2026-08-10
 - Updated: 2026-08-10
@@ -81,3 +81,21 @@ H.265 の `hev1` は 2026-08-10 に実機確認済み。`get_h265_vps_sps_pps` �
 - avc3 サポート追加 (in-band パラメータセットを正規に扱うが hisui 全体でハンドラが無い。本 issue のスコープ外)
 - nvcodec デコーダーの解像度変化追従 (issue 0093。本 issue と同じく sample_entry / パラメータセット変化の追従問題を nvcodec 側で扱う)
 - nvcodec デコーダーの `contains_parameter_sets` 全 NALU 走査化 (issue 0094)
+
+## 残存する懸念 (2026-08-10 の判断)
+
+SPS / PPS / VPS は NALU タイプごとに独立してフォールバックするため、キーフレームがパラメータセットの**一部のみ**を in-band に含む入力 (例: H.265 で VPS のみ in-band なし、SPS / PPS のみ in-band) では、新旧混在セットで再初期化が走り得る。混在セットで VideoToolbox の初期化が失敗した場合、Err は `reinitialize_if_need` の `if let Ok` の外 (`*self = Self::new_h265(...)?`) から伝播し、パイプライン全体が停止する。また、キーフレーム間で in-band 有無が不均一な入力では、旧 (sample_entry) と新 (in-band) の間で再初期化が往復するフラップが発生し得る。
+
+ただし、主要エンコーダ (x264 / x265 / VideoToolbox / NVENC) はパラメータセットをセットで出力するため、実データでは混在ケースは確認されていない。2026-08-10 のレビュー時点で、**エラー扱いのまま維持する**と判断した (実際に混在ケースに遭遇したら、その時点で混在セットの検出と再初期化スキップ等の対応を検討する)。
+
+## 解決方法
+
+`VideoToolboxDecoder` の `get_h264_sps_pps` / `get_h265_vps_sps_pps` が、フレームデータ (AVCC 形式) 内の SPS / PPS / VPS NALU を検出して再初期化判定に使うように変更した。
+
+- AVCC の length-prefix 走査による SPS / PPS / VPS 抽出を `src/video/h264.rs` の `extract_h264_sps_pps_from_avcc` と `src/video/h265.rs` の `extract_h265_vps_sps_pps_from_avcc` として新設した (NALU 長プレフィックスは 4 バイト固定)
+- フレーム内に該当 NALU があればそれを優先し、無ければ従来どおり `frame.sample_entry` (avcC / hvcc box) にフォールバックする
+- 単一 stsd + ビットストリーム内パラメータセット変化 (ffmpeg concat 出力等) の入力で、キーフレーム毎に再初期化を判定し、解像度変化に追従できるようにした
+- 回帰テストを追加した:
+  - `src/video/h264.rs` / `src/video/h265.rs` に extract ヘルパーの単体テスト (抽出・フォールバック・境界条件)
+  - `tests/e2e.rs` に `inspect --decode` で全サンプルに `width` / `height` / `decoded_data_size` が付き、後半 25 サンプルが 320x320 でデコードされることを検証する macOS 限定の回帰テスト
+  - `testdata/h264-resolution-change.mp4` / `testdata/h265-resolution-change.mp4` (ffmpeg concat で生成した再現データ)

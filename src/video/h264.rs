@@ -803,6 +803,72 @@ pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> crate::Result<Vec
     Ok(result)
 }
 
+/// AVCC 形式のフレームデータから抽出した SPS / PPS NALU
+///
+/// フレーム内に該当 NALU が無い場合は `None` となる。
+///
+/// 現在の利用箇所は macOS 限定の VideoToolbox デコーダーのみのため、
+/// macOS 以外のビルドでは未使用 (dead code) になる。テストビルドでは
+/// 本モジュールの tests が参照するため、テスト時は expect を付与しない。
+#[derive(Debug)]
+#[cfg_attr(all(not(target_os = "macos"), not(test)), expect(dead_code))]
+pub(crate) struct H264SpsPpsFromAvcc<'a> {
+    pub(crate) sps: Option<&'a [u8]>,
+    pub(crate) pps: Option<&'a [u8]>,
+}
+
+/// AVCC 形式の H.264 フレームデータから SPS / PPS NALU を抽出する
+///
+/// NALU 長プレフィックスは 4 バイト固定 (ISO/IEC 14496-15 §5.3.3.1 の
+/// `lengthSizeMinusOne` が 3 の場合。既存デコーダーも 4 バイト固定で扱う) で、
+/// フレーム内に SPS / PPS が無い場合は `None` を返す。
+/// 同一タイプの NALU が複数ある場合は最後の NALU が採用される (sample_entry 側の
+/// `sps_list.first()` / `pps_list.first()` とは選択規則が異なる)。
+/// NAL unit type は ITU-T H.264 仕様 7.4.1 の nal_unit_type (下位 5 ビット) で判定する。
+/// フレームデータが壊れている場合 (長さプレフィックスがデータ末尾を超える) は Err を返す。
+///
+/// 現在の利用箇所は macOS 限定の VideoToolbox デコーダーのみのため、
+/// macOS 以外のビルドでは未使用 (dead code) になる。テストビルドでは
+/// 本モジュールの tests が参照するため、テスト時は expect を付与しない。
+#[cfg_attr(all(not(target_os = "macos"), not(test)), expect(dead_code))]
+pub(crate) fn extract_h264_sps_pps_from_avcc(data: &[u8]) -> crate::Result<H264SpsPpsFromAvcc<'_>> {
+    let mut sps = None;
+    let mut pps = None;
+    let mut offset = 0;
+    while offset < data.len() {
+        if offset + NALU_HEADER_LENGTH > data.len() {
+            return Err(crate::Error::new(format!(
+                "invalid H264 AVCC payload: NALU length header is truncated (remaining={})",
+                data.len() - offset
+            )));
+        }
+        let nalu_len = u32::from_be_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]) as usize;
+        offset += NALU_HEADER_LENGTH;
+
+        if offset + nalu_len > data.len() {
+            return Err(crate::Error::new(format!(
+                "invalid H264 AVCC payload: NALU length {nalu_len} exceeds remaining data {} at offset {}",
+                data.len() - offset,
+                offset
+            )));
+        }
+
+        let nalu = &data[offset..offset + nalu_len];
+        match nalu.first().map(|b| b & 0x1F) {
+            Some(H264_NALU_TYPE_SPS) => sps = Some(nalu),
+            Some(H264_NALU_TYPE_PPS) => pps = Some(nalu),
+            _ => {}
+        }
+        offset += nalu_len;
+    }
+    Ok(H264SpsPpsFromAvcc { sps, pps })
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use std::sync::LazyLock;
@@ -1619,5 +1685,77 @@ pub(crate) mod tests {
             avc1.avcc_box.avc_profile_indication, 66,
             "avc_profile_indication が投入パラメタの profile_idc と一致すること"
         );
+    }
+
+    // AVCC 形式のフレームデータを構築するヘルパー
+    // 各 NALU を 4 バイト長プレフィックス付きで連結する
+    fn avcc_data(nalus: &[&[u8]]) -> Vec<u8> {
+        let mut data = Vec::new();
+        for nalu in nalus {
+            data.extend_from_slice(&(nalu.len() as u32).to_be_bytes());
+            data.extend_from_slice(nalu);
+        }
+        data
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_extracts_sps_and_pps() -> crate::Result<()> {
+        // SEI が先行するフレームデータから SPS / PPS を抽出できること
+        let data = avcc_data(&[
+            &[0x06, 0x01, 0x02, 0x03],
+            &SPS_320X240,
+            PPS_NAL,
+            &[0x65, 0x88, 0x84],
+        ]);
+        let in_frame = extract_h264_sps_pps_from_avcc(&data)?;
+        assert_eq!(in_frame.sps, Some(&SPS_320X240[..]), "SPS が抽出されること");
+        assert_eq!(in_frame.pps, Some(PPS_NAL), "PPS が抽出されること");
+        Ok(())
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_returns_none_when_missing() -> crate::Result<()> {
+        // SPS / PPS を含まないフレームデータでは None を返すこと
+        let data = avcc_data(&[&[0x65, 0x88, 0x84]]);
+        let in_frame = extract_h264_sps_pps_from_avcc(&data)?;
+        assert_eq!(in_frame.sps, None, "SPS が無い場合は None");
+        assert_eq!(in_frame.pps, None, "PPS が無い場合は None");
+        Ok(())
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_returns_err_on_truncated_length_header() {
+        // 長さプレフィックスがデータ末尾を超える場合は Err を返すこと
+        let data = vec![0x00, 0x00];
+        assert!(extract_h264_sps_pps_from_avcc(&data).is_err());
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_returns_err_on_truncated_nalu() {
+        // NALU 長がデータ末尾を超える場合は Err を返すこと
+        let mut data = Vec::new();
+        // 本来の SPS 長より大きい NALU 長を持つ不正データを構築する
+        data.extend_from_slice(&(SPS_320X240.len() as u32 + 10).to_be_bytes());
+        data.extend_from_slice(&SPS_320X240);
+        assert!(extract_h264_sps_pps_from_avcc(&data).is_err());
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_skips_zero_length_nalu() -> crate::Result<()> {
+        // ゼロ長 NALU が混在しても SPS / PPS を抽出できること (無限ループ回帰の検出)
+        let data = avcc_data(&[&[], &SPS_320X240, &[], PPS_NAL]);
+        let in_frame = extract_h264_sps_pps_from_avcc(&data)?;
+        assert_eq!(in_frame.sps, Some(&SPS_320X240[..]), "SPS が抽出されること");
+        assert_eq!(in_frame.pps, Some(PPS_NAL), "PPS が抽出されること");
+        Ok(())
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_returns_none_on_empty_data() -> crate::Result<()> {
+        // 空のフレームデータでは SPS / PPS が None になること
+        let in_frame = extract_h264_sps_pps_from_avcc(&[])?;
+        assert_eq!(in_frame.sps, None, "SPS が無い場合は None");
+        assert_eq!(in_frame.pps, None, "PPS が無い場合は None");
+        Ok(())
     }
 }
