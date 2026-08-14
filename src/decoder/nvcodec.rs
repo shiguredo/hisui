@@ -162,17 +162,16 @@ impl NvcodecDecoder {
             )));
         }
 
-        // サンプルエントリーからパラメータセットを抽出してキャッシュ
+        // サンプルエントリーからパラメータセットを抽出してキャッシュを更新する
         //
         // develop の MP4 reader (`src/mp4/sync_reader.rs`) は全フレームに sample_entry を
-        // 付与するため、抽出結果が前回値と変化したときのみキャッシュを更新する。
-        // これにより解像度変化などで sample_entry が更新された場合に古い VPS / SPS / PPS を
-        // frame data に prepend し続けないようにしつつ、毎フレームの再抽出を避ける。
+        // 付与する。解像度変化などで sample_entry が更新された場合に、新しいパラメータセット
+        // (H.264 は SPS / PPS、H.265 は VPS / SPS / PPS) を prepend できるよう毎フレーム抽出する。
         if let Some(sample_entry) = &frame.sample_entry {
-            let parameter_sets = extract_parameter_sets_annexb(sample_entry.get(), frame.format)?;
-            if self.parameter_sets.as_ref() != Some(&parameter_sets) {
-                self.parameter_sets = Some(parameter_sets);
-            }
+            self.parameter_sets = Some(extract_parameter_sets_annexb(
+                sample_entry.get(),
+                frame.format,
+            )?);
         }
 
         let data = if matches!(

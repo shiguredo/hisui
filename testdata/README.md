@@ -3,11 +3,11 @@
 ## `archive-h264-resolution-change.mp4`
 
 多エントリ `stsd` (sample_entry が 1 トラック内で切り替わる) の解像度変更の回帰テスト用データ。
-nvcodec デコーダーが sample_entry 変化に伴う VPS / SPS / PPS 更新を追従できることを検証する。
+nvcodec デコーダーが sample_entry 変化に伴う SPS / PPS 更新を追従できることを検証する。
 
-- **出所**: hotfix/2025.3.3 (PR #328) で追加されたものを develop へ復元したもの (git 履歴由来のバイナリ)
-- **ライセンス**: なし (合成データ)
-- **構成**: 多エントリ stsd (entry_count=118)。15 fps × 3 秒 = 45 フレームで、キーフレームが frame 0 / 15 / 30 にある
+- **出所**: hotfix/2025.3.3 で追加された多エントリ stsd の解像度変更テストデータを、git 履歴から develop へ復元したもの (合成データ)
+- **ライセンス**: なし
+- **構成**: 多エントリ stsd (entry_count=3)。15 fps × 3 秒 = 45 フレームで、キーフレームが frame 0 / 15 / 30 にある
   - frame 0..15 → 320x240
   - frame 15..30 → 224x160
   - frame 30..45 → 320x240

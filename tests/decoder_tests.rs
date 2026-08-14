@@ -236,7 +236,7 @@ where
 /// デコードし、sample_entry 変化に伴う parameter_sets キャッシュ更新が働くことを検証する。
 ///
 /// 修正前は `NvcodecDecoder` が parameter_sets を初回のみキャッシュしていたため、
-/// sample_entry の変化を検出できず、後半の解像度変化で古い VPS / SPS / PPS を frame data に
+/// sample_entry の変化を検出できず、後半の解像度変化で古い SPS / PPS を frame data に
 /// prepend し続けてデコード結果が壊れていた。
 #[test]
 #[cfg(feature = "nvcodec")]
@@ -287,7 +287,7 @@ fn assert_keyframes_have_no_in_band_parameter_sets(frames: &[VideoFrame]) {
     }
 }
 
-/// 出力フレームの解像度シーケンスが期待どおりか確認する共通ヘルパー。
+/// 出力フレームの解像度シーケンスが期待どおりか確認するヘルパー。
 ///
 /// テストデータ (archive-h264-resolution-change.mp4) は 15 fps × 3 秒 = 45 フレームで、
 /// キーフレームが frame 0 / 15 / 30 にある:
