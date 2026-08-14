@@ -259,7 +259,7 @@
   - @sile
 - [FIX] nvcodec デコーダーで、多エントリ stsd の MP4 内で sample_entry (VPS / SPS / PPS) が変化する入力の解像度変更を追従できない問題を修正する
   - parameter_sets を初回のみキャッシュしていたため、sample_entry 変化後の keyframe に古い parameter_sets を prepend し続けてデコード結果が壊れていた
-  - sample_entry 由来の parameter_sets を毎フレーム抽出し、前回値と変化したときのみキャッシュを更新するようにする
+  - sample_entry 由来の parameter_sets を毎フレーム抽出してキャッシュを更新するようにする
   - @sile
 
 ### misc
