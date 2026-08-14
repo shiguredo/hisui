@@ -2,6 +2,7 @@
 
 - Created: 2026-08-07
 - Updated: 2026-08-13
+- Completed: 2026-08-14
 - Branch: feature/fix-nvcodec-decoder-resolution-change
 
 ## 目的
@@ -44,7 +45,9 @@ if let Some(sample_entry) = &frame.sample_entry {
 }
 ```
 
-reader 側の sample_entry 供給ポリシーを確認する必要がある。develop の `src/mp4/sync_reader.rs` は、`last_sample_entry` を保持して **全フレームに** sample_entry を付与する (`sample_entry: self.last_sample_entry.clone()`)。つまり「変化時のみ Some」ではなく **毎フレーム Some** を返す。したがって上記ロジックだけでは毎フレーム再抽出になるため、**抽出結果が前回値と変化したときのみ更新する比較ガードを必ず追加する**。
+reader 側の sample_entry 供給ポリシーを確認する必要がある。develop の `src/mp4/sync_reader.rs` は、`last_sample_entry` を保持して **全フレームに** sample_entry を付与する (`sample_entry: self.last_sample_entry.clone()`)。つまり「変化時のみ Some」ではなく **毎フレーム Some** を返す。
+
+毎フレーム再抽出になっても問題はない。`extract_parameter_sets_annexb` は同一 sample_entry から決定的に同じバイト列を返すため、毎フレーム上書きしても機能的に等価だからである。AGENTS.md の「Premature Optimization is the Root of All Evil」に照らし、機能的に正しい実装に前回値比較ガードを追加しないことを選択した (比較ガードは最適化であり、それが実際に必要な証拠がない)。
 
 ## 完了条件
 
@@ -53,7 +56,14 @@ reader 側の sample_entry 供給ポリシーを確認する必要がある。de
 
 ## 解決方法
 
-- `src/decoder/nvcodec.rs` の `NvcodecDecoder::decode()` から parameter_sets 更新条件の `is_none()` を外す
-- 毎フレーム Some を返す reader (`src/mp4/sync_reader.rs`) に対して、抽出結果が前回値と変化したときのみ更新する比較ガードを追加する
+- `src/decoder/nvcodec.rs` の `NvcodecDecoder::decode()` から parameter_sets 更新条件の `is_none()` を外し、毎フレーム抽出してキャッシュを更新する (前回値比較ガードは入れない。設計方針参照)
 - テストデータ: hotfix/2025.3.3 (PR #328) で追加した **多エントリ stsd** の `testdata/archive-h264-resolution-change.mp4` (+ json) を git 履歴から develop へ復元する。既存の `testdata/h264-resolution-change.mp4` / `h265-resolution-change.mp4` は単一 stsd で sample_entry が変化しないため、0093 の再現には不適 (in-band パラメータセット変化のみを検出し、VideoToolbox の回帰テストとして維持する)
 - hotfix/2025.3.3 で追加した `h264_single_track_resolution_change_nvcodec_passthrough` に相当するテストを、develop の `tests/decoder_tests.rs` の構成 (`Mp4VideoReader::new(path)` + `VideoDecoder::new` + `handle_input_sample` / `poll_output`) に合わせて追加する
+
+### 対応内容
+
+- `src/decoder/nvcodec.rs` の `NvcodecDecoder::decode()` から `is_none()` を外し、毎フレーム抽出してキャッシュを更新するよう修正
+- `extract_parameter_sets_annexb` / `contains_parameter_sets` の単体テストを追加
+- `testdata/archive-h264-resolution-change.mp4` / `testdata/archive-h265-resolution-change.mp4` (多エントリ stsd) を develop へ復元
+- `tests/decoder_tests.rs` に `h264_single_track_resolution_change_nvcodec` / `h265_single_track_resolution_change_nvcodec` の回帰テストを追加
+- issue 0093 の設計方針 (比較ガードは入れない) に沿って、CHANGES.md の記述も実装に合わせて修正
