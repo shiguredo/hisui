@@ -251,6 +251,7 @@ fn h264_single_track_resolution_change_nvcodec() -> hisui::Result<()> {
     for input_frame in reader {
         input_frames.push(input_frame?);
     }
+    assert_keyframes_have_no_in_band_parameter_sets(&input_frames);
 
     let options = VideoDecoderOptions {
         openh264_lib: None,
@@ -260,6 +261,30 @@ fn h264_single_track_resolution_change_nvcodec() -> hisui::Result<()> {
     let output_frames = decode_video_frames_with_pipeline(input_frames, options)?;
     assert_expected_resolution_sequence(&output_frames);
     Ok(())
+}
+
+/// テストデータの全キーフレームが in-band SPS / PPS を先頭 NAL に持たないことを検証する。
+///
+/// nvcodec デコーダーの prepend 判定は先頭 NAL 種別 (`contains_parameter_sets`) を見るため、
+/// キーフレームが SPS / PPS で始まると修正前 (`is_none()` の初回のみキャッシュ) でもテストが
+/// 通ってしまう。データ再生成等でこの前提が崩れた場合に早期検出して回帰検出力の劣化を防ぐ。
+#[cfg(feature = "nvcodec")]
+fn assert_keyframes_have_no_in_band_parameter_sets(frames: &[VideoFrame]) {
+    use hisui::video::h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
+
+    for frame in frames.iter().filter(|f| f.keyframe) {
+        let first_nal_type = frame
+            .data
+            .get(hisui::video::h264::NALU_HEADER_LENGTH)
+            .map(|b| b & 0x1F);
+        assert!(
+            !matches!(
+                first_nal_type,
+                Some(H264_NALU_TYPE_SPS) | Some(H264_NALU_TYPE_PPS)
+            ),
+            "キーフレームが in-band SPS / PPS を先頭に持つ (テストデータ前提が崩れている)"
+        );
+    }
 }
 
 /// 出力フレームの解像度シーケンスが期待どおりか確認する共通ヘルパー。

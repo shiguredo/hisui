@@ -317,3 +317,135 @@ fn contains_parameter_sets(data: &[u8], format: VideoFormat) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // PPS NAL を Annex-B 形式 (先頭 4 バイト start code + NAL バイト列) で表現したフィクスチャ
+    const PPS_ANNEXB: &[u8] = &[0, 0, 0, 1, 0x68, 0xce, 0x06, 0xe2];
+
+    #[test]
+    fn extract_parameter_sets_annexb_h264_concats_sps_pps() -> crate::Result<()> {
+        // H.264 の avcC (SPS / PPS) が Annex-B 形式に変換されること
+        let annexb: Vec<u8> = [
+            &crate::video::h264::tests::SPS_320X240_ANNEXB[..],
+            PPS_ANNEXB,
+        ]
+        .concat();
+        let entry = crate::video::h264::h264_sample_entry_from_annexb(&annexb)?;
+        let out = extract_parameter_sets_annexb(&entry, VideoFormat::H264)?;
+        assert_eq!(out, annexb, "SPS / PPS が Annex-B 形式で抽出されること");
+        Ok(())
+    }
+
+    #[test]
+    fn extract_parameter_sets_annexb_h265_concats_vps_sps_pps() -> crate::Result<()> {
+        // H.265 の hvcc (VPS / SPS / PPS) が Annex-B 形式に変換されること
+        let vps = vec![0x40, 0x01, 0xaa];
+        let sps = crate::video::h265::tests::HEVC_SPS_640X480.to_vec();
+        let pps = vec![0x44, 0x01, 0xcc];
+        let (entry, _frame_size) = crate::video::h265::h265_sample_entry_from_vps_sps_pps_lists(
+            vec![vps.clone()],
+            vec![sps.clone()],
+            vec![pps.clone()],
+            crate::video::FrameRate::FPS_30,
+        )?;
+        let out = extract_parameter_sets_annexb(&entry, VideoFormat::H265)?;
+        let mut expected = Vec::new();
+        for nalu in [&vps[..], &sps[..], &pps[..]] {
+            expected.extend_from_slice(&[0, 0, 0, 1]);
+            expected.extend_from_slice(nalu);
+        }
+        assert_eq!(
+            out, expected,
+            "VPS / SPS / PPS が Annex-B 形式で抽出されること"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn extract_parameter_sets_annexb_returns_empty_for_non_h264_h265() -> crate::Result<()> {
+        // VP8 / VP9 / AV1 はパラメータセットを持たないため空を返すこと
+        let annexb: Vec<u8> = [
+            &crate::video::h264::tests::SPS_320X240_ANNEXB[..],
+            PPS_ANNEXB,
+        ]
+        .concat();
+        let entry = crate::video::h264::h264_sample_entry_from_annexb(&annexb)?;
+        for format in [VideoFormat::Vp8, VideoFormat::Vp9, VideoFormat::Av1] {
+            let out = extract_parameter_sets_annexb(&entry, format)?;
+            assert!(out.is_empty(), "{format:?} では空を返すこと");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn contains_parameter_sets_h264_returns_true_for_sps_pps() {
+        // 先頭 NAL が SPS (0x67) / PPS (0x68) の場合は true を返すこと
+        assert!(contains_parameter_sets(
+            &[0, 0, 0, 1, 0x67, 0x42],
+            VideoFormat::H264
+        ));
+        assert!(contains_parameter_sets(
+            &[0, 0, 0, 1, 0x68, 0xce],
+            VideoFormat::H264
+        ));
+    }
+
+    #[test]
+    fn contains_parameter_sets_h264_returns_false_for_idr_sei() {
+        // 先頭 NAL が IDR (0x65) / SEI (0x06) の場合は false を返すこと
+        assert!(!contains_parameter_sets(
+            &[0, 0, 0, 1, 0x65, 0x88],
+            VideoFormat::H264
+        ));
+        assert!(!contains_parameter_sets(
+            &[0, 0, 0, 1, 0x06, 0x05],
+            VideoFormat::H264
+        ));
+    }
+
+    #[test]
+    fn contains_parameter_sets_h265_returns_true_for_vps_sps_pps() {
+        // 先頭 NAL が VPS (0x40) / SPS (0x42) / PPS (0x44) の場合は true を返すこと
+        assert!(contains_parameter_sets(
+            &[0, 0, 0, 1, 0x40, 0x01],
+            VideoFormat::H265
+        ));
+        assert!(contains_parameter_sets(
+            &[0, 0, 0, 1, 0x42, 0x01],
+            VideoFormat::H265
+        ));
+        assert!(contains_parameter_sets(
+            &[0, 0, 0, 1, 0x44, 0x01],
+            VideoFormat::H265
+        ));
+    }
+
+    #[test]
+    fn contains_parameter_sets_h265_returns_false_for_idr() {
+        // 先頭 NAL が IDR (0x26) の場合は false を返すこと
+        assert!(!contains_parameter_sets(
+            &[0, 0, 0, 1, 0x26, 0x01],
+            VideoFormat::H265
+        ));
+    }
+
+    #[test]
+    fn contains_parameter_sets_short_buffer_returns_false() {
+        // NALU_HEADER_LENGTH + 1 に満たないバッファでは false を返すこと
+        assert!(!contains_parameter_sets(&[], VideoFormat::H264));
+        assert!(!contains_parameter_sets(&[0, 0, 0, 1], VideoFormat::H264));
+        assert!(!contains_parameter_sets(&[0, 0, 0, 1], VideoFormat::H265));
+    }
+
+    #[test]
+    fn contains_parameter_sets_av1_returns_false() {
+        // AV1 はパラメータセットの概念が異なるため常に false を返すこと
+        assert!(!contains_parameter_sets(
+            &[0, 0, 0, 1, 0xaa, 0xbb],
+            VideoFormat::Av1
+        ));
+    }
+}
