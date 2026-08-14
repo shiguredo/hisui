@@ -2,6 +2,7 @@
 
 - Created: 2026-08-07
 - Updated: 2026-08-13
+- Completed: 2026-08-14
 - Branch: feature/fix-nvcodec-decoder-resolution-change
 
 ## 目的
@@ -58,3 +59,11 @@ reader 側の sample_entry 供給ポリシーを確認する必要がある。de
 - `src/decoder/nvcodec.rs` の `NvcodecDecoder::decode()` から parameter_sets 更新条件の `is_none()` を外し、毎フレーム抽出してキャッシュを更新する (前回値比較ガードは入れない。設計方針参照)
 - テストデータ: hotfix/2025.3.3 (PR #328) で追加した **多エントリ stsd** の `testdata/archive-h264-resolution-change.mp4` (+ json) を git 履歴から develop へ復元する。既存の `testdata/h264-resolution-change.mp4` / `h265-resolution-change.mp4` は単一 stsd で sample_entry が変化しないため、0093 の再現には不適 (in-band パラメータセット変化のみを検出し、VideoToolbox の回帰テストとして維持する)
 - hotfix/2025.3.3 で追加した `h264_single_track_resolution_change_nvcodec_passthrough` に相当するテストを、develop の `tests/decoder_tests.rs` の構成 (`Mp4VideoReader::new(path)` + `VideoDecoder::new` + `handle_input_sample` / `poll_output`) に合わせて追加する
+
+### 対応内容
+
+- `src/decoder/nvcodec.rs` の `NvcodecDecoder::decode()` から `is_none()` を外し、毎フレーム抽出してキャッシュを更新するよう修正
+- `extract_parameter_sets_annexb` / `contains_parameter_sets` の単体テストを追加
+- `testdata/archive-h264-resolution-change.mp4` / `testdata/archive-h265-resolution-change.mp4` (多エントリ stsd) を develop へ復元
+- `tests/decoder_tests.rs` に `h264_single_track_resolution_change_nvcodec` / `h265_single_track_resolution_change_nvcodec` の回帰テストを追加
+- issue 0093 の設計方針 (比較ガードは入れない) に沿って、CHANGES.md の記述も実装に合わせて修正
