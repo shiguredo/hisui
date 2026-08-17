@@ -1,10 +1,8 @@
 use std::borrow::Cow;
 
 use super::{DecodeConfig, OutputSink};
-use crate::video::h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
-use crate::video::h265::{
-    H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH,
-};
+use crate::video::h264::extract_h264_sps_pps_from_avcc;
+use crate::video::h265::{NALU_HEADER_LENGTH, extract_h265_vps_sps_pps_from_avcc};
 use crate::video::{VideoFormat, VideoFrame};
 
 #[derive(Debug)]
@@ -191,7 +189,7 @@ impl NvcodecDecoder {
             // キーフレームで、かつパラメータセットがデータに含まれていない場合は先頭に追加
             if frame.keyframe
                 && let Some(parameter_sets) = &self.parameter_sets
-                && !contains_parameter_sets(data, frame.format)
+                && !contains_parameter_sets(data, frame.format)?
             {
                 data_annexb.extend_from_slice(parameter_sets);
             }
@@ -289,31 +287,36 @@ fn extract_parameter_sets_annexb(
     }
 }
 
-/// データの先頭にパラメータセットが含まれているかチェック
-fn contains_parameter_sets(data: &[u8], format: VideoFormat) -> bool {
-    if data.len() < NALU_HEADER_LENGTH + 1 {
-        return false;
-    }
-
+/// データ内にパラメータセットの完全な組 (H.264 は SPS / PPS、H.265 は VPS / SPS / PPS) が
+/// 含まれているかチェック
+///
+/// length prefix ベースで全 NALU を走査する共通ロジック
+/// (`extract_h264_sps_pps_from_avcc` / `extract_h265_vps_sps_pps_from_avcc`) を再利用する。
+/// `[SEI][SPS][PPS][IDR]` や `[AUD][SPS][PPS][IDR]` のように SPS / PPS が先頭以外に現れる
+/// keyframe でも正しく検出できる。
+///
+/// NVDEC が keyframe をデコードするにはパラメータセットの完全な組が必要なため、一部だけ
+/// 揃っている場合は false を返し、呼び出し側で sample_entry 由来の完全な組を補完させる。
+///
+/// フレームデータが壊れている場合 (長さプレフィックスがデータ末尾を超える) は `Err` を返す。
+fn contains_parameter_sets(data: &[u8], format: VideoFormat) -> crate::Result<bool> {
     match format {
-        VideoFormat::H265 => {
-            // H.265 の NAL unit type は 2バイト目の上位6ビット
-            let nal_unit_type = (data[NALU_HEADER_LENGTH] >> 1) & 0x3F;
-            matches!(
-                nal_unit_type,
-                H265_NALU_TYPE_PPS | H265_NALU_TYPE_SPS | H265_NALU_TYPE_VPS
-            )
-        }
         VideoFormat::H264 => {
-            // H.264 の NAL unit type は下位5ビット
-            let nal_unit_type = data[NALU_HEADER_LENGTH] & 0x1F;
-            matches!(nal_unit_type, H264_NALU_TYPE_SPS | H264_NALU_TYPE_PPS)
+            let p = extract_h264_sps_pps_from_avcc(data)?;
+            // NVDEC が H.264 をデコードするには SPS と PPS の両方が揃っている必要があるため、
+            // 完全な組が揃ったときだけ true を返す (一部のみでは sample_entry から補完する)。
+            Ok(p.sps.is_some() && p.pps.is_some())
         }
-        VideoFormat::Av1 => {
-            // AV1はパラメータセットの概念が異なるため常にfalse
-            false
+        VideoFormat::H265 => {
+            let p = extract_h265_vps_sps_pps_from_avcc(data)?;
+            // NVDEC が H.265 をデコードするには VPS / SPS / PPS が全て揃っている必要があるため、
+            // 完全な組が揃ったときだけ true を返す。
+            Ok(p.vps.is_some() && p.sps.is_some() && p.pps.is_some())
         }
-        _ => false,
+        _ => {
+            // AV1 等はパラメータセットの概念が異なるため常に false
+            Ok(false)
+        }
     }
 }
 
@@ -380,71 +383,154 @@ mod tests {
     }
 
     #[test]
-    fn contains_parameter_sets_h264_returns_true_for_sps_pps() {
-        // 先頭 NAL が SPS (0x67) / PPS (0x68) の場合は true を返すこと
+    fn contains_parameter_sets_h264_returns_true_for_full_sps_pps() -> crate::Result<()> {
+        // SPS (0x67) と PPS (0x68) の完全な組が揃っている場合は true を返すこと
         assert!(contains_parameter_sets(
-            &[0, 0, 0, 1, 0x67, 0x42],
+            &[0, 0, 0, 1, 0x67, 0, 0, 0, 1, 0x68],
             VideoFormat::H264
-        ));
-        assert!(contains_parameter_sets(
-            &[0, 0, 0, 1, 0x68, 0xce],
-            VideoFormat::H264
-        ));
+        )?);
+        Ok(())
     }
 
     #[test]
-    fn contains_parameter_sets_h264_returns_false_for_idr_sei() {
-        // 先頭 NAL が IDR (0x65) / SEI (0x06) の場合は false を返すこと
+    fn contains_parameter_sets_h264_returns_true_for_sei_aud_prefix_full() -> crate::Result<()> {
+        // SEI (0x06) や AUD (0x09) が先頭、後続に SPS / PPS の完全な組がある場合は true を返すこと
+        assert!(contains_parameter_sets(
+            &[0, 0, 0, 1, 0x06, 0, 0, 0, 1, 0x67, 0, 0, 0, 1, 0x68],
+            VideoFormat::H264
+        )?);
+        assert!(contains_parameter_sets(
+            &[0, 0, 0, 1, 0x09, 0, 0, 0, 1, 0x67, 0, 0, 0, 1, 0x68],
+            VideoFormat::H264
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    fn contains_parameter_sets_h264_returns_false_for_partial_sps() -> crate::Result<()> {
+        // SPS のみ (PPS 欠落) の場合は false を返し、sample_entry から PPS を補完させること。
+        // 旧実装は SPS だけでも true を返していたが、NVDEC には SPS と PPS の両方が必要。
         assert!(!contains_parameter_sets(
-            &[0, 0, 0, 1, 0x65, 0x88],
+            &[0, 0, 0, 1, 0x67],
             VideoFormat::H264
-        ));
+        )?);
         assert!(!contains_parameter_sets(
-            &[0, 0, 0, 1, 0x06, 0x05],
+            &[0, 0, 0, 1, 0x68],
             VideoFormat::H264
-        ));
-    }
-
-    #[test]
-    fn contains_parameter_sets_h265_returns_true_for_vps_sps_pps() {
-        // 先頭 NAL が VPS (0x40) / SPS (0x42) / PPS (0x44) の場合は true を返すこと
-        assert!(contains_parameter_sets(
-            &[0, 0, 0, 1, 0x40, 0x01],
-            VideoFormat::H265
-        ));
-        assert!(contains_parameter_sets(
-            &[0, 0, 0, 1, 0x42, 0x01],
-            VideoFormat::H265
-        ));
-        assert!(contains_parameter_sets(
-            &[0, 0, 0, 1, 0x44, 0x01],
-            VideoFormat::H265
-        ));
-    }
-
-    #[test]
-    fn contains_parameter_sets_h265_returns_false_for_idr() {
-        // 先頭 NAL が IDR (0x26) の場合は false を返すこと
+        )?);
+        // SEI 先行で後続に SPS のみ (PPS 欠落) の場合も false
         assert!(!contains_parameter_sets(
-            &[0, 0, 0, 1, 0x26, 0x01],
+            &[0, 0, 0, 1, 0x06, 0, 0, 0, 1, 0x67],
+            VideoFormat::H264
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    fn contains_parameter_sets_h264_returns_false_for_idr_sei() -> crate::Result<()> {
+        // 先頭 NAL が IDR (0x65) / SEI (0x06) のみで SPS / PPS を含まない場合は false を返すこと
+        assert!(!contains_parameter_sets(
+            &[0, 0, 0, 1, 0x65],
+            VideoFormat::H264
+        )?);
+        assert!(!contains_parameter_sets(
+            &[0, 0, 0, 1, 0x06],
+            VideoFormat::H264
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    fn contains_parameter_sets_h265_returns_true_for_full_vps_sps_pps() -> crate::Result<()> {
+        // VPS (0x40) / SPS (0x42) / PPS (0x44) の完全な組が揃っている場合は true を返すこと
+        assert!(contains_parameter_sets(
+            &[0, 0, 0, 1, 0x40, 0, 0, 0, 1, 0x42, 0, 0, 0, 1, 0x44],
             VideoFormat::H265
-        ));
+        )?);
+        Ok(())
     }
 
     #[test]
-    fn contains_parameter_sets_short_buffer_returns_false() {
-        // NALU_HEADER_LENGTH + 1 に満たないバッファでは false を返すこと
-        assert!(!contains_parameter_sets(&[], VideoFormat::H264));
-        assert!(!contains_parameter_sets(&[0, 0, 0, 1], VideoFormat::H264));
-        assert!(!contains_parameter_sets(&[0, 0, 0, 1], VideoFormat::H265));
+    fn contains_parameter_sets_h265_returns_true_for_sei_aud_prefix_full() -> crate::Result<()> {
+        // SEI (NAL type 39 = 0x4e) や AUD (NAL type 35 = 0x46) が先頭、後続に VPS / SPS / PPS の
+        // 完全な組がある場合は true を返すこと。
+        assert!(contains_parameter_sets(
+            &[
+                0, 0, 0, 1, 0x4e, 0, 0, 0, 1, 0x40, 0, 0, 0, 1, 0x42, 0, 0, 0, 1, 0x44
+            ],
+            VideoFormat::H265
+        )?);
+        assert!(contains_parameter_sets(
+            &[
+                0, 0, 0, 1, 0x46, 0, 0, 0, 1, 0x40, 0, 0, 0, 1, 0x42, 0, 0, 0, 1, 0x44
+            ],
+            VideoFormat::H265
+        )?);
+        Ok(())
     }
 
     #[test]
-    fn contains_parameter_sets_av1_returns_false() {
+    fn contains_parameter_sets_h265_returns_false_for_partial_parameter_sets() -> crate::Result<()>
+    {
+        // VPS / SPS / PPS の一部だけ (完全な組ではない) 場合は false を返し、
+        // sample_entry から補完させること。
+        assert!(!contains_parameter_sets(
+            &[0, 0, 0, 1, 0x40],
+            VideoFormat::H265
+        )?);
+        assert!(!contains_parameter_sets(
+            &[0, 0, 0, 1, 0x42],
+            VideoFormat::H265
+        )?);
+        assert!(!contains_parameter_sets(
+            &[0, 0, 0, 1, 0x44],
+            VideoFormat::H265
+        )?);
+        // SEI 先行で後続に SPS のみ (VPS / PPS 欠落) の場合も false
+        assert!(!contains_parameter_sets(
+            &[0, 0, 0, 1, 0x4e, 0, 0, 0, 1, 0x42],
+            VideoFormat::H265
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    fn contains_parameter_sets_h265_returns_false_for_idr() -> crate::Result<()> {
+        // 先頭 NAL が IDR (0x26) のみでパラメータセットを含まない場合は false を返すこと
+        assert!(!contains_parameter_sets(
+            &[0, 0, 0, 1, 0x26],
+            VideoFormat::H265
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    fn contains_parameter_sets_empty_returns_false() -> crate::Result<()> {
+        // 空バッファではループが回らずパラメータセットなしとして false を返すこと
+        assert!(!contains_parameter_sets(&[], VideoFormat::H264)?);
+        assert!(!contains_parameter_sets(&[], VideoFormat::H265)?);
+        Ok(())
+    }
+
+    #[test]
+    fn contains_parameter_sets_truncated_returns_err() {
+        // NALU 長プレフィックスが宣言する長さに対してデータが不足する壊れたバッファは
+        // Err を返すこと
+        assert!(contains_parameter_sets(&[0, 0, 0, 1], VideoFormat::H264).is_err());
+        assert!(contains_parameter_sets(&[0, 0, 0, 1], VideoFormat::H265).is_err());
+        // 長さ 1 の NALU を宣言したがデータが 2 バイトある場合も末尾が壊れている (H.264)
+        assert!(contains_parameter_sets(&[0, 0, 0, 1, 0x67, 0x42], VideoFormat::H264).is_err());
+        // H.265 も同様に末尾の余分バイトで Err になる
+        assert!(contains_parameter_sets(&[0, 0, 0, 1, 0x42, 0x01], VideoFormat::H265).is_err());
+    }
+
+    #[test]
+    fn contains_parameter_sets_av1_returns_false() -> crate::Result<()> {
         // AV1 はパラメータセットの概念が異なるため常に false を返すこと
         assert!(!contains_parameter_sets(
             &[0, 0, 0, 1, 0xaa, 0xbb],
             VideoFormat::Av1
-        ));
+        )?);
+        Ok(())
     }
 }
