@@ -5,7 +5,7 @@
 
 ## 目的
 
-`src/decoder/nvcodec.rs` の `contains_parameter_sets` を length prefix ベースの全 NALU 走査に変えて、SEI / AUD 先行時にも SPS / PPS の存在を正しく検出できるようにする。他ソース由来の H.264 / H.265 入力への堅牢性を上げる目的。
+`src/decoder/nvcodec.rs` の `contains_parameter_sets` を length prefix ベースの全 NALU 走査に変えて、SEI / AUD 先行時にも SPS / PPS (H.265 では VPS も) の完全な組を正しく検出できるようにする。他ソース由来の H.264 / H.265 入力への堅牢性を上げる目的。
 
 ## 現状
 
@@ -45,18 +45,19 @@ Sora の H.264 / H.265 録画では通常 SEI / AUD が先頭に来ないため�
 
 ## 完了条件
 
-- SEI 先行 / AUD 先行の keyframe でも SPS / PPS の存在を正しく検出できる
-- 単体テスト (`#[cfg(test)] mod tests`) で以下 4 パターンを最低限カバーする
-  - 先頭が SPS
-  - 先頭が SEI、後続に SPS
-  - 先頭が AUD、後続に SPS
-  - SPS がまったく含まれない (`false` を返す)
+- SEI 先行 / AUD 先行の keyframe でも SPS / PPS (H.265 では VPS / SPS / PPS) の**完全な組**を正しく検出できる
+- 完全な組が揃っていない keyframe (例: SPS のみで PPS 欠落) では false を返し、sample_entry 由来のパラメータセットを prepend して補完する
+- 単体テスト (`#[cfg(test)] mod tests`) で以下を最低限カバーする
+  - H.264 / H.265 それぞれで完全な組が揃っている場合 (`true` を返す)
+  - 先頭が SEI / AUD、後続に完全な組がある場合 (`true` を返す)
+  - 完全な組が揃っていない場合 (SPS のみ等、`false` を返す)
+  - パラメータセットがまったく含まれない場合 (`false` を返す)
 
 ## 解決方法
 
 - `contains_parameter_sets` を `bool` ではなく `crate::Result<bool>` を返す形に変更し、内部で共通関数を呼ぶ
-  - `VideoFormat::H264`: `extract_h264_sps_pps_from_avcc` の `sps` / `pps` がどちらかでも `Some` なら `true`
-  - `VideoFormat::H265`: `extract_h265_vps_sps_pps_from_avcc` の `vps` / `sps` / `pps` がどれかでも `Some` なら `true`
+  - `VideoFormat::H264`: `extract_h264_sps_pps_from_avcc` の `sps` / `pps` が**両方** `Some` なら `true` (AND)
+  - `VideoFormat::H265`: `extract_h265_vps_sps_pps_from_avcc` の `vps` / `sps` / `pps` が**全て** `Some` なら `true` (AND)
   - それ以外の形式 (`Av1` / `Vp8` / `Vp9` 等) は `false`
 - 共通関数は壊れたフレーム (長さプレフィックスがデータ末尾を超える) を `Err` で返す。呼び出し側 (`src/decoder/nvcodec.rs` の Annex B 変換ループ前のパラメータセット prepend 分岐) で `?` により `Err` を巻き上げる。後段の Annex B 変換ループも同様に壊れたデータを `Err` にするため、`Err` を巻き上げるのが整合的
 - nvcodec.rs で `contains_parameter_sets` 専用に使われていた `H264_NALU_TYPE_*` / `H265_NALU_TYPE_*` のインポートは不要になるため削除する (`NALU_HEADER_LENGTH` は Annex B 変換ループで引き続き使用するため残す)
@@ -64,5 +65,6 @@ Sora の H.264 / H.265 録画では通常 SEI / AUD が先頭に来ないため�
 
 ## 実装時の決定事項 (2026-08-17)
 
+- **判定を AND (完全な組) に変更**: 初版実装は OR 判定 (いずれか 1 個でも存在すれば true) だったが、NVDEC が keyframe をデコードするには H.264 は SPS と PPS、H.265 は VPS / SPS / PPS の完全な組が必要なため、AND 判定に修正した。OR のままだと `[SEI][SPS][IDR]` (PPS 欠落) のような不完全な keyframe で prepend を過剰に抑止し、NVDEC にパラメータセットが揃わずデコード失敗を招く。AND 化により完全な組が無ければ sample_entry から補完する (安全側)。これは同じ prepend ロジックを持つ OpenH264 デコーダー (`src/decoder/openh264.rs` の `has_sps && has_pps` 判定) の規約とも整合する
 - **テストデータの AVCC 形式修正**: 旧テストは「長さ 1 の NALU の後ろに余分なバイト」を持つ (`[0,0,0,1, 0x67, 0x42]` 等) 壊れたデータを使っていた。旧実装は先頭 1 バイトだけ見るため気付かなかったが、共通関数は AVCC 構造を厳密に走査するため末尾の余分バイトを `Err` (truncated) として検出する。テストデータを正しい AVCC 形式 (各 NALU = 長さプレフィックス + データのみ) に修正した
 - **`short_buffer` テストの意図変更**: `&[0,0,0,1]` (長さプレフィックスのみで NALU データ不足) は「SPS なし」ではなく「壊れたデータ」であり、共通関数は `Err` を返す。従来の `contains_parameter_sets_short_buffer_returns_false` は空バッファ (`&[]`) のみの false 確認に絞り、壊れたデータの `Err` 検証は新規テスト `contains_parameter_sets_truncated_returns_err` として分離した
