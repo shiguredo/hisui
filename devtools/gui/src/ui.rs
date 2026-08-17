@@ -1,43 +1,28 @@
 //! DevTools の GPUI UI。
 //!
 //! ブラウザ版 devtools の P2P ページ (`devtools/src/pages/P2PPage.tsx`) 相当の UI を提供する。
-//! 接続状態・DataChannel 状態・映像表示・ログ表示・ソース管理 (OBS WebSocket リクエスト) を実装する。
+//! 接続状態・DataChannel 状態・映像再生・ログ表示・ソース管理 (OBS WebSocket リクエスト) を実装する。
+//! 映像の GPUI 表示は [`hisui_devtools_gui::video::VideoDisplay`] に委譲する。
+
+mod frame;
 
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{
-    Context, Entity, ImageSource, ObjectFit, Render, RenderImage, SharedString, Window, div, img,
-    rgb,
-};
+use gpui::{Context, Entity, Render, SharedString, Window, div, rgb};
 
 use hisui_devtools_gui::obsdc::RequestResponseData;
 use hisui_devtools_gui::p2p::{
     BootstrapConfig, ClientEvent, ConnectionState, DataChannelState as ClientDcState, IceServer,
     LogCategory, LogEntry, LogLevel, OwnedVideoFrame, P2PClientHandle, spawn_client,
 };
+use hisui_devtools_gui::video::VideoDisplay;
 
-/// 映像の移動ドラッグの状態。
-///
-/// `on_drag` で設定し、`on_drag_move` で参照する。
-/// リサイズと別の型にすることで、ドラッグ種別を型で判別する。
-#[derive(Clone)]
-struct VideoMoveState {
-    track_id: String,
-}
+use frame::to_render_image;
 
-/// 映像のリサイズドラッグの状態。
-///
-/// `on_drag` で設定し、`on_drag_move` で参照する。
-/// 移動と別の型にすることで、ドラッグ種別を型で判別する。
-#[derive(Clone)]
-struct VideoResizeState {
-    track_id: String,
-}
-
-/// 映像表示領域に表示するトラックの情報 (位置・サイズ込み)。
-type VideoTileItem = (String, Arc<RenderImage>, gpui::Point<f32>, gpui::Size<f32>);
+/// 表示更新間隔。サーバーは 30fps で送るため、これより細かく変換すると追いつかない。
+const DISPLAY_INTERVAL: Duration = Duration::from_millis(33);
 
 /// 映像トラックの情報。
 struct TrackInfo {
@@ -71,17 +56,9 @@ pub struct DevToolsApp {
     log_filter_pc: bool,
     log_filter_signaling: bool,
     log_filter_obsdc: bool,
-    /// トラックごとの最新映像フレーム (BGRA)。ドラッグで配置を自由に変更できる。
-    videos: std::collections::BTreeMap<String, Arc<RenderImage>>,
-    /// トラックごとの映像表示位置 (ピクセル)
-    video_positions: std::collections::HashMap<String, gpui::Point<f32>>,
-    /// トラックごとの映像表示サイズ (ピクセル)
-    video_sizes: std::collections::HashMap<String, gpui::Size<f32>>,
-    /// ドラッグ中の前回マウス位置
-    drag_prev_mouse: Option<gpui::Point<f32>>,
+    /// 映像再生コンポーネント
+    video_display: Entity<VideoDisplay>,
     last_error: Option<String>,
-    /// 接続中かどうか (映像プレースホルダの表示切り替え用)
-    connecting: bool,
     /// 現在のシーン名
     current_scene: String,
     /// ソース一覧
@@ -104,6 +81,7 @@ impl DevToolsApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
         tracing::info!("DevToolsApp::new called");
         let (client, event_rx) = spawn_client().expect("P2P クライアントの起動に失敗しました");
+        let video_display = cx.new(VideoDisplay::new);
 
         let mut app = Self {
             client,
@@ -115,12 +93,8 @@ impl DevToolsApp {
             log_filter_pc: true,
             log_filter_signaling: true,
             log_filter_obsdc: true,
-            videos: std::collections::BTreeMap::new(),
-            video_positions: std::collections::HashMap::new(),
-            video_sizes: std::collections::HashMap::new(),
-            drag_prev_mouse: None,
+            video_display,
             last_error: None,
-            connecting: false,
             current_scene: String::new(),
             sources: Vec::new(),
             show_camera_dialog: false,
@@ -139,7 +113,7 @@ impl DevToolsApp {
     ///
     /// tokio のチャネルは waker ベースで tokio ランタイムが無くても await できるため、
     /// GPUI のフォアグラウンドエグゼキュータ (メインスレッド) 上で受信する。
-    /// 映像フレームは `TrackAdded` でトラックごとに受信タスクを起動する。
+    /// 映像フレームは `TrackAdded` で受信タスクを起動し、変換後に [`VideoDisplay`] へ渡す。
     fn start_event_tasks(
         &mut self,
         cx: &mut Context<Self>,
@@ -161,21 +135,20 @@ impl DevToolsApp {
 
     /// トラックの映像フレーム受信タスクを起動する。
     ///
-    /// トラックごとに独立したチャネルを持つため、複数トラックが同時に
-    /// フレームを送っても相互に上書きされず、それぞれ 30fps で表示できる。
+    /// I420 を [`gpui::RenderImage`] に変換し、GPUI コンポーネントへ渡す。
+    /// タイルの描画自体は [`VideoDisplay`] が担当する。
     fn start_frame_task(
         &mut self,
         cx: &mut Context<Self>,
         track_id: String,
         mut frame_rx: tokio::sync::watch::Receiver<Option<OwnedVideoFrame>>,
     ) {
-        let frame_app = cx.entity();
-        cx.spawn(async move |_weak, cx| {
+        cx.spawn(async move |app, cx| {
             // 表示レートを 30fps に制限する。
             // サーバーは各映像トラックを 30fps で送信するため、
             // 制限しないと色変換が追いつかずカクカクする。
             let mut last_display = std::time::Instant::now()
-                .checked_sub(std::time::Duration::from_secs(1))
+                .checked_sub(Duration::from_secs(1))
                 .unwrap_or_else(std::time::Instant::now);
             let mut frame_count: u64 = 0;
             let mut last_log = std::time::Instant::now();
@@ -187,7 +160,7 @@ impl DevToolsApp {
                 };
                 frame_count += 1;
                 // フレームレート確認用のログ (5 秒ごと)
-                if last_log.elapsed() >= std::time::Duration::from_secs(5) {
+                if last_log.elapsed() >= Duration::from_secs(5) {
                     tracing::info!(
                         "frame received: {}x{} track={} rate={:.1} fps",
                         frame.width,
@@ -200,7 +173,7 @@ impl DevToolsApp {
                 }
                 // 表示レートを制限する。制限を超えたフレームは
                 // watch チャネルで最新フレームに置き換えられる
-                if last_display.elapsed() < std::time::Duration::from_millis(33) {
+                if last_display.elapsed() < DISPLAY_INTERVAL {
                     continue;
                 }
                 last_display = std::time::Instant::now();
@@ -211,22 +184,30 @@ impl DevToolsApp {
                     .background_executor()
                     .spawn(async move { to_render_image(&frame) })
                     .await;
-                if let Some(render_image) = render_image {
-                    let _ = frame_app.update::<_, gpui::AsyncApp>(cx, |app, cx| {
+                let Some(render_image) = render_image else {
+                    continue;
+                };
+                if app
+                    .update(cx, |app, cx| {
                         // 削除済みトラックのフレームは無視する。
                         // トラック削除後もサーバーからフレームが届き続けることがあり、
                         // 映像タイルが復活してしまうのを防ぐ。
                         if !app.tracks.iter().any(|track| track.track_id == track_id) {
                             return;
                         }
-                        // 初回受信時に初期サイズを決定する (幅 480px にアスペクト比でスケール)
-                        app.video_sizes.entry(track_id.clone()).or_insert_with(|| {
-                            let scale = 480.0 / frame_width.max(1) as f32;
-                            gpui::size(480.0, (frame_height as f32 * scale).max(1.0))
+                        app.video_display.update(cx, |display, cx| {
+                            display.show_frame(
+                                track_id.clone(),
+                                render_image,
+                                frame_width,
+                                frame_height,
+                                cx,
+                            );
                         });
-                        app.videos.insert(track_id.clone(), render_image);
-                        cx.notify();
-                    });
+                    })
+                    .is_err()
+                {
+                    break;
                 }
             }
         })
@@ -237,10 +218,13 @@ impl DevToolsApp {
         match event {
             ClientEvent::ConnectionStateChanged(state) => {
                 self.connection_state = state;
-                self.connecting = matches!(
+                let connecting = matches!(
                     state,
                     ConnectionState::Bootstrapping | ConnectionState::Connecting
                 );
+                self.video_display.update(cx, |display, cx| {
+                    display.set_connecting(connecting, cx);
+                });
                 if state == ConnectionState::Connected {
                     // 接続直後にソース一覧を取得する
                     self.refresh_sources(cx);
@@ -270,19 +254,20 @@ impl DevToolsApp {
                     track_id: track_id.clone(),
                     kind,
                 });
-                // トラックごとの映像フレーム受信タスクを起動する
                 self.start_frame_task(cx, track_id, frame_rx);
             }
             ClientEvent::TrackRemoved { track_id } => {
                 self.tracks.retain(|track| track.track_id != track_id);
-                self.videos.remove(&track_id);
-                self.video_positions.remove(&track_id);
-                self.video_sizes.remove(&track_id);
+                self.video_display.update(cx, |display, cx| {
+                    display.remove_track(&track_id, cx);
+                });
             }
             ClientEvent::CloseReceived { code, reason } => {
                 self.last_error = Some(format!("{code:?}: {reason}"));
                 self.connection_state = ConnectionState::Closed;
-                self.connecting = false;
+                self.video_display.update(cx, |display, cx| {
+                    display.set_connecting(false, cx);
+                });
             }
             ClientEvent::Log { entry } => {
                 tracing::info!("[{}] {:?} {}", entry.category, entry.level, entry.message);
@@ -845,23 +830,14 @@ impl Render for DevToolsApp {
                             .child(sources_panel(self, is_connected, cx)),
                     )
                     .child(
-                        // メイン: 映像表示
+                        // メイン: 映像再生
                         div()
                             .flex_1()
                             .m_3()
                             .bg(rgb(0x111111))
                             .rounded_md()
                             .overflow_hidden()
-                            .child(
-                                video_area(
-                                    cx.entity(),
-                                    &self.videos,
-                                    &self.video_positions,
-                                    &self.video_sizes,
-                                    self.connecting,
-                                )
-                                .into_any_element(),
-                            ),
+                            .child(self.video_display.clone()),
                     ),
             )
             .child(
@@ -940,173 +916,6 @@ fn log_filter_button(
             cx.notify();
         }))
         .child(category.to_string())
-}
-
-/// 映像表示領域。トラックごとの映像を自由配置で表示する。
-///
-/// 映像はドラッグで移動でき、右下のハンドルでリサイズできる。
-/// 位置・サイズはトラックごとに `video_positions` / `video_sizes` に保持される。
-fn video_area(
-    app: gpui::Entity<DevToolsApp>,
-    videos: &std::collections::BTreeMap<String, Arc<RenderImage>>,
-    positions: &std::collections::HashMap<String, gpui::Point<f32>>,
-    sizes: &std::collections::HashMap<String, gpui::Size<f32>>,
-    connecting: bool,
-) -> gpui::AnyElement {
-    if videos.is_empty() {
-        return div()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .flex()
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(rgb(0x888888))
-                    .child(if connecting {
-                        "接続中..."
-                    } else {
-                        "映像なし"
-                    }),
-            )
-            .into_any_element();
-    }
-
-    // トラックごとの位置・サイズを収集する
-    let items: Vec<VideoTileItem> = videos
-        .iter()
-        .map(|(track_id, video)| {
-            let position = positions.get(track_id).copied().unwrap_or_default();
-            let size = sizes
-                .get(track_id)
-                .copied()
-                .unwrap_or_else(|| gpui::size(480.0, 270.0));
-            (track_id.clone(), video.clone(), position, size)
-        })
-        .collect();
-
-    div()
-        .size_full()
-        .relative()
-        .overflow_hidden()
-        .bg(rgb(0x000000))
-        .children(items.into_iter().map(|(track_id, video, position, size)| {
-            video_tile(app.clone(), track_id, video, position, size).into_any_element()
-        }))
-        .into_any_element()
-}
-
-/// 映像トラック 1 枚のタイル。ドラッグで移動、右下のハンドルでリサイズできる。
-fn video_tile(
-    app: gpui::Entity<DevToolsApp>,
-    track_id: String,
-    video: Arc<RenderImage>,
-    position: gpui::Point<f32>,
-    size: gpui::Size<f32>,
-) -> impl IntoElement {
-    let app_for_move = app.clone();
-    let app_for_drag = app_for_move.clone();
-    div()
-        .absolute()
-        .left(gpui::px(position.x))
-        .top(gpui::px(position.y))
-        .w(gpui::px(size.width))
-        .h(gpui::px(size.height))
-        .bg(rgb(0x111111))
-        .overflow_hidden()
-        .id(gpui::ElementId::Name(gpui::SharedString::from(format!(
-            "video-tile-{track_id}"
-        ))))
-        .on_drag(
-            VideoMoveState {
-                track_id: track_id.clone(),
-            },
-            move |_, _offset, window, cx| {
-                // offset は要素 origin からの相対位置のため、
-                // ドラッグ開始位置はウィンドウ座標のマウス位置を記録する
-                app_for_drag.update::<_, gpui::App>(cx, |app, _| {
-                    app.drag_prev_mouse = Some(window.mouse_position().map(f32::from));
-                });
-                cx.new(|_| gpui::EmptyView)
-            },
-        )
-        .on_drag_move({
-            let app = app_for_move.clone();
-            move |event, _window, cx| {
-                let drag: &VideoMoveState = event.drag(cx);
-                let track_id = drag.track_id.clone();
-                // Pixels を f32 に変換する
-                let position = event.event.position.map(f32::from);
-                app.update::<_, gpui::App>(cx, |app, _| {
-                    let prev = app.drag_prev_mouse.unwrap_or(position);
-                    let entry = app.video_positions.entry(track_id).or_default();
-                    entry.x += position.x - prev.x;
-                    entry.y += position.y - prev.y;
-                    app.drag_prev_mouse = Some(position);
-                });
-            }
-        })
-        .child(
-            img(ImageSource::Render(video))
-                .size_full()
-                .object_fit(ObjectFit::Contain)
-                .id(gpui::ElementId::Name(gpui::SharedString::from(format!(
-                    "video-{track_id}"
-                )))),
-        )
-        .child(resize_handle(app, track_id))
-}
-
-/// 映像タイルの右下に表示するリサイズハンドル。ドラッグでサイズを変更できる。
-fn resize_handle(app: gpui::Entity<DevToolsApp>, track_id: String) -> impl IntoElement {
-    let app_for_resize = app.clone();
-    let app_for_drag = app_for_resize.clone();
-    div()
-        .absolute()
-        .right_0()
-        .bottom_0()
-        .w(gpui::px(16.))
-        .h(gpui::px(16.))
-        .bg(rgb(0x2b5a2b))
-        .id(gpui::ElementId::Name(gpui::SharedString::from(format!(
-            "resize-handle-{track_id}"
-        ))))
-        .on_drag(
-            VideoResizeState {
-                track_id: track_id.clone(),
-            },
-            move |_, _offset, window, cx| {
-                // offset は要素 origin からの相対位置のため、
-                // ドラッグ開始位置はウィンドウ座標のマウス位置を記録する
-                app_for_drag.update::<_, gpui::App>(cx, |app, _| {
-                    app.drag_prev_mouse = Some(window.mouse_position().map(f32::from));
-                });
-                cx.new(|_| gpui::EmptyView)
-            },
-        )
-        .on_drag_move({
-            let app = app_for_resize.clone();
-            move |event, _window, cx| {
-                let drag: &VideoResizeState = event.drag(cx);
-                let track_id = drag.track_id.clone();
-                // Pixels を f32 に変換する
-                let position = event.event.position.map(f32::from);
-                app.update::<_, gpui::App>(cx, |app, _| {
-                    let prev = app.drag_prev_mouse.unwrap_or(position);
-                    let entry = app.video_sizes.entry(track_id).or_default();
-                    entry.width += position.x - prev.x;
-                    entry.height += position.y - prev.y;
-                    // 最小サイズを保証する
-                    if entry.width < 80.0 {
-                        entry.width = 80.0;
-                    }
-                    if entry.height < 45.0 {
-                        entry.height = 45.0;
-                    }
-                    app.drag_prev_mouse = Some(position);
-                });
-            }
-        })
 }
 
 /// ソース管理パネル。
@@ -1361,41 +1170,6 @@ fn log_line(entry: &LogEntry) -> impl IntoElement {
         .child(div().flex_1().text_color(color).child(message))
 }
 
-/// I420 フレームを GPUI の RenderImage (BGRA バイト列) に変換する
-///
-/// GPUI は BGRA バイト列 ([B][G][R][A] 順) を期待する。
-/// libyuv のピクセル形式名は「ビッグエンディアンの 32 ビット値」であり、
-/// リトルエンディアン環境ではメモリ順が逆になる。
-/// `I420ToARGB` の出力はメモリ上 [B][G][R][A] となり、GPUI の期待と一致する。
-fn to_render_image(frame: &OwnedVideoFrame) -> Option<Arc<RenderImage>> {
-    use shiguredo_libyuv::{ArgbImageMut, I420Image};
-
-    let width = frame.width as usize;
-    let height = frame.height as usize;
-    if width == 0 || height == 0 {
-        return None;
-    }
-
-    let src = I420Image {
-        y: &frame.y,
-        y_stride: frame.stride_y as usize,
-        u: &frame.u,
-        u_stride: frame.stride_u as usize,
-        v: &frame.v,
-        v_stride: frame.stride_v as usize,
-    };
-    let mut bgra = vec![0_u8; width * height * 4];
-    let mut dst = ArgbImageMut {
-        data: &mut bgra,
-        stride: width * 4,
-    };
-    let size = shiguredo_libyuv::ImageSize { width, height };
-    shiguredo_libyuv::i420_to_argb(&src, &mut dst, size).ok()?;
-
-    let bgra_image = image::RgbaImage::from_raw(width as u32, height as u32, bgra)?;
-    Some(Arc::new(RenderImage::new([image::Frame::new(bgra_image)])))
-}
-
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1409,7 +1183,3 @@ fn default_bootstrap_url() -> SharedString {
         .unwrap_or_else(|_| "http://127.0.0.1:4455/bootstrap".to_owned())
         .into()
 }
-
-// Entity 型の警告を抑えるための参照 (後で接続タスクで使用する)
-#[allow(dead_code)]
-type _AppEntity = Entity<DevToolsApp>;
