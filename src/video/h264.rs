@@ -807,11 +807,14 @@ pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> crate::Result<Vec
 ///
 /// フレーム内に該当 NALU が無い場合は `None` となる。
 ///
-/// 現在の利用箇所は macOS 限定の VideoToolbox デコーダーのみのため、
-/// macOS 以外のビルドでは未使用 (dead code) になる。テストビルドでは
+/// 現在の利用箇所は macOS 限定の VideoToolbox デコーダーと nvcodec デコーダーのため、
+/// macOS 以外で nvcodec を無効化したビルドでは未使用 (dead code) になる。テストビルドでは
 /// 本モジュールの tests が参照するため、テスト時は expect を付与しない。
 #[derive(Debug)]
-#[cfg_attr(all(not(target_os = "macos"), not(test)), expect(dead_code))]
+#[cfg_attr(
+    all(not(target_os = "macos"), not(feature = "nvcodec"), not(test)),
+    expect(dead_code)
+)]
 pub(crate) struct H264SpsPpsFromAvcc<'a> {
     pub(crate) sps: Option<&'a [u8]>,
     pub(crate) pps: Option<&'a [u8]>,
@@ -827,10 +830,13 @@ pub(crate) struct H264SpsPpsFromAvcc<'a> {
 /// NAL unit type は ITU-T H.264 仕様 7.4.1 の nal_unit_type (下位 5 ビット) で判定する。
 /// フレームデータが壊れている場合 (長さプレフィックスがデータ末尾を超える) は Err を返す。
 ///
-/// 現在の利用箇所は macOS 限定の VideoToolbox デコーダーのみのため、
-/// macOS 以外のビルドでは未使用 (dead code) になる。テストビルドでは
+/// 現在の利用箇所は macOS 限定の VideoToolbox デコーダーと nvcodec デコーダーのため、
+/// macOS 以外で nvcodec を無効化したビルドでは未使用 (dead code) になる。テストビルドでは
 /// 本モジュールの tests が参照するため、テスト時は expect を付与しない。
-#[cfg_attr(all(not(target_os = "macos"), not(test)), expect(dead_code))]
+#[cfg_attr(
+    all(not(target_os = "macos"), not(feature = "nvcodec"), not(test)),
+    expect(dead_code)
+)]
 pub(crate) fn extract_h264_sps_pps_from_avcc(data: &[u8]) -> crate::Result<H264SpsPpsFromAvcc<'_>> {
     let mut sps = None;
     let mut pps = None;
