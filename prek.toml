@@ -106,10 +106,11 @@ pass_filenames = false
 priority = 10
 
 # cargo test: コミットを遅くしないため pre-push でだけ実行する
+# pre-push では hisui 本体のユニットテストのみ実行する (統合テスト・pbt は CI で担保する)
 [[repos.hooks]]
 id = "cargo-test"
-name = "cargo test"
-entry = "cargo test --workspace"
+name = "cargo test (unit)"
+entry = "cargo test -p hisui --lib"
 language = "system"
 types = ["rust"]
 pass_filenames = false
