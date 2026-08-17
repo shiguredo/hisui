@@ -505,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn contains_parameter_sets_short_buffer_returns_false() -> crate::Result<()> {
+    fn contains_parameter_sets_empty_returns_false() -> crate::Result<()> {
         // 空バッファではループが回らずパラメータセットなしとして false を返すこと
         assert!(!contains_parameter_sets(&[], VideoFormat::H264)?);
         assert!(!contains_parameter_sets(&[], VideoFormat::H265)?);
@@ -518,8 +518,10 @@ mod tests {
         // Err を返すこと
         assert!(contains_parameter_sets(&[0, 0, 0, 1], VideoFormat::H264).is_err());
         assert!(contains_parameter_sets(&[0, 0, 0, 1], VideoFormat::H265).is_err());
-        // 長さ 1 の NALU を宣言したがデータが 2 バイトある場合も末尾が壊れている
+        // 長さ 1 の NALU を宣言したがデータが 2 バイトある場合も末尾が壊れている (H.264)
         assert!(contains_parameter_sets(&[0, 0, 0, 1, 0x67, 0x42], VideoFormat::H264).is_err());
+        // H.265 も同様に末尾の余分バイトで Err になる
+        assert!(contains_parameter_sets(&[0, 0, 0, 1, 0x42, 0x01], VideoFormat::H265).is_err());
     }
 
     #[test]
