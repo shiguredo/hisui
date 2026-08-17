@@ -1,6 +1,7 @@
 # nvcodec デコーダーの contains_parameter_sets が先頭 1 NALU しか判定しない
 
 - Created: 2026-08-07
+- Completed: 2026-08-17
 - Branch: feature/refactor-nvcodec-contains-parameter-sets
 
 ## 目的
