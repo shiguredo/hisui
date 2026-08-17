@@ -262,6 +262,10 @@
   - sample_entry 由来の parameter_sets を毎フレーム抽出してキャッシュを更新するようにする
   - H.264 / H.265 の多エントリ stsd テストデータ (回帰テスト) を追加する
   - @sile
+- [FIX] nvcodec デコーダーで、SEI / AUD が先頭に現れる keyframe のパラメータセット (SPS / PPS、H.265 では VPS / SPS / PPS) を検出できず二重 prepend される問題を修正する
+  - 先頭 1 NALU しか見ずに SPS / PPS / VPS の有無を判定していたため、`[SEI][SPS][PPS][IDR]` 等の入力で検出に失敗してキャッシュ済みパラメータセットを二重 prepend していた
+  - length prefix ベースで全 NALU を走査する共通ロジックを利用し、完全な組が揃ったときだけ prepend を抑止するようにする
+  - @sile
 
 ### misc
 
