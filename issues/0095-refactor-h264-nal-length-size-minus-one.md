@@ -19,11 +19,23 @@ inspect コマンドの H.264 NAL 情報取得が「区切りバイトサイズ 
 
 - AVCC ではサンプルデータの NAL 長フィールドは avcC ボックスの `lengthSizeMinusOne` (0〜3 = 1〜4 バイト) で決まる
 - サンプルデータの NAL パース時に、対応トラックの avcC から取得した `lengthSizeMinusOne` を使って長フィールドを可変長で読み取る
-- 具体的な変更対象は polish で確定する。候補:
-  - `src/subcommand_inspect.rs` の H.264 NAL パースに `lengthSizeMinusOne` を渡す
-  - サンプルエントリー (`SharedSampleEntry` / `AvccBox`) から `length_size_minus_one` を取り出す経路の整備
+- 変更対象は `src/subcommand_inspect.rs` の `VideoCodecSpecificInfo::new` (`VideoFormat::H264` 分岐) に閉じる
+
+## 解決方法
+
+- `VideoCodecSpecificInfo::new` の `VideoFormat::H264` 分岐で、NAL 長フィールドを読み取るバイト数 (`length_size`) を次から取得する
+  - `sample.sample_entry` (`VideoFrame` の `pub` フィールド) → `SharedSampleEntry::get()` → `SampleEntry::Avc1` → `avcc_box.length_size_minus_one.get() + 1` (1〜4)
+  - 取得パターンは既存の `src/rtmp/frame.rs` の `extract_nalu_length_size` を参考にする
+- `sample.sample_entry` が `None`、または `SampleEntry::Avc1` でない場合は `NALU_HEADER_LENGTH` (4 バイト固定) にフォールバックする
+  - `VideoFrame` の不変条件 (`docs/internals/sample_entry_invariant.md`) では圧縮フォーマットの `VideoFrame` は常に `Some` を持つため、フォールバックは防御的措置
+- `VideoFormat::H264` 分岐の NAL パースを、`length_size` バイトの長フィールドを big-endian で読む可変長ロジックに変更する
+  - 現状の「4 バイト固定」(`u32::from_be_bytes`) を廃止し、`length_size` 1〜4 に応じて読むバイト数を変える
+  - 読み取りロジックは `subcommand_inspect.rs` 内のヘルパー関数として実装する (共通関数化はしない)
+  - 符号化側 (`Annex B → AVC`) の `src/video/h264.rs` の `convert_annexb_to_nalu` は逆方向のため再利用しない
+- 変更は `src/subcommand_inspect.rs` のみに閉じる
 
 ## 完了条件
 
 - `lengthSizeMinusOne` が 3 以外の MP4 を入力に与えても、inspect が H.264 NAL 情報 (type / nri) を正しく出力できること
 - `lengthSizeMinusOne` が 3 の既存 MP4 の読み込みに回帰がないこと
+- `VideoCodecSpecificInfo::new` の単体テストで `length_size` 1〜4 の各ケース (NAL 長フィールドが正しく読めること) を検証する
