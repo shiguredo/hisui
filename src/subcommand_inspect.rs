@@ -757,12 +757,27 @@ mod tests {
     #[test]
     fn video_codec_specific_info_h264_respects_length_size() {
         // length_size 1〜4 のそれぞれで、AVCC の NAL 長フィールドを正しく読めること
+        //
+        // 各 length_size で「長フィールドの複数バイトにまたがる長さ」の NAL を 1 つ含め、
+        // encode_nal による往復 (encode → parse → type 抽出) を検証する。
+        // length_size=1 では 255 (1 バイト長の最大表現可能値) を境界として検証する。
         for length_size in 1..=4 {
-            // SPS (0x67) / PPS (0x68) / IDR (0x65) の 3 NAL を length_size で連結する
+            let long_nalu_len = match length_size {
+                1 => 255,
+                2 => 300,
+                3 => 70000,
+                4 => 200000,
+                _ => unreachable!(),
+            };
+            // 先頭バイトを SPS (0x67) にすることで、長さが正しく読めた場合に type 7 として検出される
+            let long_nalu = vec![0x67u8; long_nalu_len];
+
+            // SPS (0x67) / PPS (0x68) / IDR (0x65) / 長い SPS の 4 NAL を length_size で連結する
             let mut data = Vec::new();
             data.extend_from_slice(&encode_nal(length_size, &[0x67, 0x42]));
             data.extend_from_slice(&encode_nal(length_size, &[0x68, 0xce]));
             data.extend_from_slice(&encode_nal(length_size, &[0x65, 0x88]));
+            data.extend_from_slice(&encode_nal(length_size, &long_nalu));
 
             let frame = build_h264_avcc_frame(&data, length_size, true);
             let info = VideoCodecSpecificInfo::new(&frame)
@@ -770,10 +785,14 @@ mod tests {
 
             match info {
                 VideoCodecSpecificInfo::H264 { nalus } => {
-                    assert_eq!(nalus.len(), 3, "3 個の NAL が検出されること");
+                    assert_eq!(nalus.len(), 4, "4 個の NAL が検出されること");
                     assert_eq!(nalus[0].ty, 7, "先頭 NAL は SPS (type 7) であること");
                     assert_eq!(nalus[1].ty, 8, "2 番目の NAL は PPS (type 8) であること");
                     assert_eq!(nalus[2].ty, 5, "3 番目の NAL は IDR (type 5) であること");
+                    assert_eq!(
+                        nalus[3].ty, 7,
+                        "長い NAL が正しく読めて SPS (type 7) として検出されること"
+                    );
                 }
             }
         }
