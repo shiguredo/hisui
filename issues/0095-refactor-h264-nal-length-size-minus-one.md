@@ -1,7 +1,7 @@
 # H.264 サンプルデータの NAL 区切りバイトサイズを lengthSizeMinusOne に基づいて汎用化する
 
 - Created: 2026-08-04
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-18
 - Branch: feature/refactor-h264-nal-length-size-minus-one
 - Polished: {YYYY-MM-DD}
 
@@ -39,3 +39,9 @@ inspect コマンドの H.264 NAL 情報取得が「区切りバイトサイズ 
 - `lengthSizeMinusOne` が 3 以外の MP4 を入力に与えても、inspect が H.264 NAL 情報 (type / nri) を正しく出力できること
 - `lengthSizeMinusOne` が 3 の既存 MP4 の読み込みに回帰がないこと
 - `VideoCodecSpecificInfo::new` の単体テストで `length_size` 1〜4 の各ケース (NAL 長フィールドが正しく読めること) を検証する
+
+## 実装時の決定事項 (2026-08-18)
+
+- **可変長 NAL 長フィールドの実装**: `VideoFormat::H264` 分岐で `sample.sample_entry` → `SharedSampleEntry::get()` → `SampleEntry::Avc1` → `avcc_box.length_size_minus_one.get() + 1` から `length_size` (1〜4) を取得し、可変長の NAL 長フィールドを big-endian で読むヘルパー `read_nal_length` を新設した。`sample_entry` が `None` または非 `Avc1` の場合は `NALU_HEADER_LENGTH` (4 バイト固定) にフォールバックする
+- **エラーパスのテスト追加**: 長さ 0 の NAL、長さプレフィックスが残データを超える不正入力を `VideoCodecSpecificInfo::new` に与えて `None` が返ることを検証するテストを追加した
+- **多バイト長 NAL のテスト追加**: length_size ごとに「長フィールドの複数バイトにまたがる長さ」の NAL (length_size=1 では 255 境界、以降は 300 / 70000 / 200000) を含めて、encode → parse → type 抽出の往復を検証するテストを追加した
