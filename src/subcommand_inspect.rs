@@ -4,6 +4,7 @@ use std::{
     time::Duration,
 };
 
+use shiguredo_mp4::boxes::SampleEntry;
 use shiguredo_mp4::demux::Mp4FileKind;
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
     mp4::file_kind::detect_mp4_file_kind,
     mp4::sample_reader::{Mp4SampleReader, Mp4SampleReaderOptions},
     types::{CodecName, ContainerFormat},
-    video::h264::H264AnnexBNalUnits,
+    video::h264::{H264AnnexBNalUnits, NALU_HEADER_LENGTH},
     video::{VideoFormat, VideoFrame},
 };
 use shiguredo_openh264::Openh264Library;
@@ -339,13 +340,26 @@ impl VideoCodecSpecificInfo {
                 Some(VideoCodecSpecificInfo::H264 { nalus })
             }
             VideoFormat::H264 => {
+                // AVCC 形式では NAL 長フィールドのバイト数は対応トラックの avcC の
+                // lengthSizeMinusOne (0〜3 = 1〜4 バイト) で決まる。
+                // サンプルエントリーから取得し、取得できない場合は 4 バイト固定にフォールバックする。
+                let length_size = sample
+                    .sample_entry
+                    .as_ref()
+                    .and_then(|entry| match entry.get() {
+                        SampleEntry::Avc1(avc1) => {
+                            Some(avc1.avcc_box.length_size_minus_one.get() as usize + 1)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(NALU_HEADER_LENGTH);
+
                 let mut nalus = Vec::new();
                 let mut data = &sample.data[..];
 
-                // NOTE: H.264 の AVCC 形式では区切りバイトサイズは 4 に固定
-                while data.len() > 4 {
-                    let length = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
-                    data = &data[4..];
+                while data.len() > length_size {
+                    let length = read_nal_length(data, length_size)?;
+                    data = &data[length_size..];
 
                     if data.len() < length || length == 0 {
                         return None;
@@ -364,6 +378,21 @@ impl VideoCodecSpecificInfo {
             _ => None,
         }
     }
+}
+
+/// AVCC 形式の先頭 `length_size` バイトを big-endian の NAL 長として読み取る
+///
+/// `length_size` は 1〜4 を想定する (avcC の `lengthSizeMinusOne + 1`)。
+/// 長フィールドが `length_size` バイトに満たない場合は `None` を返す。
+fn read_nal_length(data: &[u8], length_size: usize) -> Option<usize> {
+    if data.len() < length_size {
+        return None;
+    }
+    let mut length = 0usize;
+    for &byte in &data[..length_size] {
+        length = (length << 8) | byte as usize;
+    }
+    Some(length)
 }
 
 #[derive(Debug)]
@@ -648,7 +677,165 @@ impl nojson::DisplayJson for OutputPrinter {
 
 #[cfg(test)]
 mod tests {
+    use shiguredo_mp4::{
+        Uint,
+        boxes::{Avc1Box, AvccBox, SampleEntry},
+    };
+
     use super::*;
+    use crate::sample_entry::SharedSampleEntry;
+    use crate::video::sample_entry_visual_fields;
+
+    /// `VideoCodecSpecificInfo::new` を検証するための AVCC 形式 H.264 `VideoFrame` を構築する
+    ///
+    /// `length_size` は NAL 長フィールドのバイト数 (avcC の `lengthSizeMinusOne + 1` に相当)。
+    /// `sample_entry` が `Some` の場合は、`length_size - 1` を `lengthSizeMinusOne` に持つ
+    /// `SampleEntry::Avc1` を設定し、`None` の場合は sample_entry を空にする。
+    fn build_h264_avcc_frame(
+        data: &[u8],
+        length_size: usize,
+        with_sample_entry: bool,
+    ) -> VideoFrame {
+        let sample_entry = with_sample_entry.then(|| {
+            SharedSampleEntry::new(SampleEntry::Avc1(Avc1Box {
+                visual: sample_entry_visual_fields(320, 240),
+                avcc_box: AvccBox {
+                    avc_profile_indication: 0x42,
+                    profile_compatibility: 0,
+                    avc_level_indication: 0x1e,
+                    chroma_format: None,
+                    bit_depth_luma_minus8: None,
+                    bit_depth_chroma_minus8: None,
+                    length_size_minus_one: Uint::new((length_size - 1) as u8),
+                    sps_ext_list: Vec::new(),
+                    sps_list: Vec::new(),
+                    pps_list: Vec::new(),
+                },
+                unknown_boxes: Vec::new(),
+            }))
+        });
+        VideoFrame {
+            data: data.to_vec(),
+            format: VideoFormat::H264,
+            keyframe: true,
+            size: None,
+            timestamp: Duration::ZERO,
+            sample_entry,
+        }
+    }
+
+    /// `length_size` バイトの big-endian NAL 長プレフィックス + NAL データを組み立てる
+    fn encode_nal(length_size: usize, nalu: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let len = nalu.len();
+        for shift in (0..length_size).rev() {
+            out.push((len >> (shift * 8)) as u8);
+        }
+        out.extend_from_slice(nalu);
+        out
+    }
+
+    #[test]
+    fn read_nal_length_reads_variable_length() {
+        // 1〜4 バイトの長フィールドを big-endian で正しく読めること
+        assert_eq!(read_nal_length(&[0x01], 1), Some(1));
+        assert_eq!(read_nal_length(&[0x01, 0x02], 2), Some(0x0102));
+        assert_eq!(read_nal_length(&[0x01, 0x02, 0x03], 3), Some(0x010203));
+        assert_eq!(
+            read_nal_length(&[0x01, 0x02, 0x03, 0x04], 4),
+            Some(0x01020304)
+        );
+    }
+
+    #[test]
+    fn read_nal_length_returns_none_when_too_short() {
+        // 長フィールドが `length_size` バイトに満たない場合は None を返すこと
+        assert_eq!(read_nal_length(&[], 1), None);
+        assert_eq!(read_nal_length(&[0x01], 2), None);
+    }
+
+    #[test]
+    fn video_codec_specific_info_h264_respects_length_size() {
+        // length_size 1〜4 のそれぞれで、AVCC の NAL 長フィールドを正しく読めること
+        //
+        // 各 length_size で「長フィールドの複数バイトにまたがる長さ」の NAL を 1 つ含め、
+        // encode_nal による往復 (encode → parse → type 抽出) を検証する。
+        // length_size=1 では 255 (1 バイト長の最大表現可能値) を境界として検証する。
+        for length_size in 1..=4 {
+            let long_nalu_len = match length_size {
+                1 => 255,
+                2 => 300,
+                3 => 70000,
+                4 => 200000,
+                _ => unreachable!(),
+            };
+            // 先頭バイトを SPS (0x67) にすることで、長さが正しく読めた場合に type 7 として検出される
+            let long_nalu = vec![0x67u8; long_nalu_len];
+
+            // SPS (0x67) / PPS (0x68) / IDR (0x65) / 長い SPS の 4 NAL を length_size で連結する
+            let mut data = Vec::new();
+            data.extend_from_slice(&encode_nal(length_size, &[0x67, 0x42]));
+            data.extend_from_slice(&encode_nal(length_size, &[0x68, 0xce]));
+            data.extend_from_slice(&encode_nal(length_size, &[0x65, 0x88]));
+            data.extend_from_slice(&encode_nal(length_size, &long_nalu));
+
+            let frame = build_h264_avcc_frame(&data, length_size, true);
+            let info = VideoCodecSpecificInfo::new(&frame)
+                .expect("AVCC 形式の H.264 フレームから NAL 情報を取得できること");
+
+            match info {
+                VideoCodecSpecificInfo::H264 { nalus } => {
+                    assert_eq!(nalus.len(), 4, "4 個の NAL が検出されること");
+                    assert_eq!(nalus[0].ty, 7, "先頭 NAL は SPS (type 7) であること");
+                    assert_eq!(nalus[1].ty, 8, "2 番目の NAL は PPS (type 8) であること");
+                    assert_eq!(nalus[2].ty, 5, "3 番目の NAL は IDR (type 5) であること");
+                    assert_eq!(
+                        nalus[3].ty, 7,
+                        "長い NAL が正しく読めて SPS (type 7) として検出されること"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn video_codec_specific_info_h264_returns_none_on_invalid_length() {
+        // 長さプレフィックスが残データを超える不正入力では None が返ること
+        // 先頭の NAL (長さ 2) を処理した後、次の長フィールド 0xff (実データ 1 バイトより超過) を読んで None になる
+        let mut data = encode_nal(4, &[0x67, 0x42]);
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0xff, 0x00]);
+        let frame = build_h264_avcc_frame(&data, 4, true);
+        assert!(
+            VideoCodecSpecificInfo::new(&frame).is_none(),
+            "長さ超過の NAL で None が返ること"
+        );
+
+        // 長さ 0 の NAL では None が返ること
+        // 先頭の NAL (長さ 2) を処理した後、次の長フィールド 0 (長さ 0) を読んで None になる
+        let mut data = encode_nal(4, &[0x67, 0x42]);
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00]);
+        let frame = build_h264_avcc_frame(&data, 4, true);
+        assert!(
+            VideoCodecSpecificInfo::new(&frame).is_none(),
+            "長さ 0 の NAL で None が返ること"
+        );
+    }
+
+    #[test]
+    fn video_codec_specific_info_h264_falls_back_to_4bytes_without_sample_entry() {
+        // sample_entry が None の場合、4 バイト固定で NAL 長フィールドを読むこと
+        let data = encode_nal(4, &[0x67, 0x42]);
+        let frame = build_h264_avcc_frame(&data, 4, false);
+        let info = VideoCodecSpecificInfo::new(&frame)
+            .expect("sample_entry なしでも 4 バイト固定で NAL 情報を取得できること");
+
+        match info {
+            VideoCodecSpecificInfo::H264 { nalus } => {
+                assert_eq!(nalus.len(), 1, "1 個の NAL が検出されること");
+                assert_eq!(nalus[0].ty, 7, "NAL は SPS (type 7) であること");
+            }
+        }
+    }
 
     #[test]
     fn detect_regular_mp4_as_mp4() {
