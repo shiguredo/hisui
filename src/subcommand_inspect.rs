@@ -780,6 +780,29 @@ mod tests {
     }
 
     #[test]
+    fn video_codec_specific_info_h264_returns_none_on_invalid_length() {
+        // 長さプレフィックスが残データを超える不正入力では None が返ること
+        // 先頭の NAL (長さ 2) を処理した後、次の長フィールド 0xff (実データ 1 バイトより超過) を読んで None になる
+        let mut data = encode_nal(4, &[0x67, 0x42]);
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0xff, 0x00]);
+        let frame = build_h264_avcc_frame(&data, 4, true);
+        assert!(
+            VideoCodecSpecificInfo::new(&frame).is_none(),
+            "長さ超過の NAL で None が返ること"
+        );
+
+        // 長さ 0 の NAL では None が返ること
+        // 先頭の NAL (長さ 2) を処理した後、次の長フィールド 0 (長さ 0) を読んで None になる
+        let mut data = encode_nal(4, &[0x67, 0x42]);
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00]);
+        let frame = build_h264_avcc_frame(&data, 4, true);
+        assert!(
+            VideoCodecSpecificInfo::new(&frame).is_none(),
+            "長さ 0 の NAL で None が返ること"
+        );
+    }
+
+    #[test]
     fn video_codec_specific_info_h264_falls_back_to_4bytes_without_sample_entry() {
         // sample_entry が None の場合、4 バイト固定で NAL 長フィールドを読むこと
         let data = encode_nal(4, &[0x67, 0x42]);
