@@ -1307,6 +1307,9 @@ fn sample_entry_variant_name(entry: Option<&shiguredo_mp4::boxes::SampleEntry>) 
         Some(SampleEntry::Opus(_)) => "Opus",
         Some(SampleEntry::Mp4a(_)) => "Mp4a",
         Some(SampleEntry::Flac(_)) => "Flac",
+        Some(SampleEntry::Stpp(_)) => "Stpp",
+        Some(SampleEntry::Wvtt(_)) => "Wvtt",
+        Some(SampleEntry::Tx3g(_)) => "Tx3g",
         Some(SampleEntry::Unknown(_)) => "Unknown",
     }
 }

@@ -1062,6 +1062,8 @@ impl Mp4FileReader {
                 self.handle_video_sample(state, context, suppress_publish, handle)
                     .await
             }
+            // 字幕トラックは未対応のため読み飛ばす
+            TrackKind::Subtitle => Ok(SampleProcessingResult::Continue),
         }
     }
 

@@ -16,7 +16,7 @@ processor 間の接続、起動順、同期、メッセージ配送、 processor
 以下は対象外です。
 
 - 各 source / mixer / encoder / writer のアルゴリズム詳細
-- `obsws` や `compose` のユースケース固有の制御
+- `obsws` のユースケース固有の制御
 
 ## 全体モデル
 

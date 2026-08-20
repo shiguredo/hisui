@@ -4,9 +4,7 @@ use std::time::Duration;
 use hisui::{
     MediaFrame, MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     VideoFrame,
-    encoder::{
-        EncoderRunOutput, VideoEncoder, VideoEncoderOptions, default_video_encode_config_for_rpc,
-    },
+    encoder::{EncodeConfig, EncoderRunOutput, VideoEncoder, VideoEncoderOptions},
     types::{CodecName, EvenUsize},
     video::{FrameRate, VideoFormat, VideoFrameSize},
 };
@@ -28,7 +26,7 @@ fn vp8_options() -> VideoEncoderOptions {
             numerator: NonZeroUsize::MIN.saturating_add(29),
             denumerator: NonZeroUsize::MIN,
         },
-        encode_params: default_video_encode_config_for_rpc(),
+        encode_params: EncodeConfig::default(),
     }
 }
 
@@ -198,8 +196,7 @@ fn video_encoder_keyframe_metric_increments_only_for_keyframes() -> hisui::Resul
 ///
 /// source → `VideoEncoder::run` → sink の 3 processor pipeline を組み、
 /// 実 I420 入力を VP8 に圧縮した出力が sink に届くことを確認する。
-/// 使用側 (`recording_subcommand_compose.rs:577` 等) と同じ `spawn_processor` 経路の
-/// 挙動を最低 1 経路担保する。
+/// 使用側 (server / obsws) と同じ `spawn_processor` 経路の挙動を最低 1 経路担保する。
 #[test]
 fn video_encoder_run_processes_i420_via_pipeline() -> hisui::Result<()> {
     const FRAME_COUNT: u64 = 3;

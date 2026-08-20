@@ -2,8 +2,14 @@ use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 
 use super::OutputSink;
 use crate::{
-    video::h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, H264AnnexBNalUnits, NALU_HEADER_LENGTH},
-    video::h265::{H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS},
+    video::h264::{
+        H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, H264AnnexBNalUnits, NALU_HEADER_LENGTH,
+        extract_h264_sps_pps_from_avcc,
+    },
+    video::h265::{
+        H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS,
+        extract_h265_vps_sps_pps_from_avcc,
+    },
     video::{VideoFormat, VideoFrame},
 };
 
@@ -119,7 +125,8 @@ impl VideoToolboxDecoder {
     // H264/H265: VPS/SPS/PPS の変化で判定
     // VP9/AV1: 解像度の変化で判定
     //
-    // [NOTE] WebM 対応がなくなったら VideoDecoder 側でサンプルエントリーの変更を見てハンドリングできる
+    // [NOTE] WebM 対応削除によりサンプルエントリーの変更を見て判定できるようになったが、
+    // 現状は上記の組み合わせ判定のままにしている
     fn reinitialize_if_need(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         if !frame.keyframe {
             // 切り替わりが発生するのは必ずキーフレーム
@@ -259,6 +266,11 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
             }
         }
         VideoFormat::H264 => {
+            // フレームデータ (AVCC 形式) 内の SPS / PPS を優先し、無ければ sample_entry にフォールバックする。
+            // 単一 stsd + ビットストリーム内パラメータセット変化の入力では、キーフレームの
+            // フレームデータ内に in-band の SPS / PPS が含まれるため、sample_entry だけでなく
+            // フレームデータも参照して再初期化を判定する。
+            let in_frame = extract_h264_sps_pps_from_avcc(&frame.data)?;
             let Some(SampleEntry::Avc1(Avc1Box {
                 avcc_box: AvccBox {
                     sps_list, pps_list, ..
@@ -270,14 +282,20 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
                     "missing sample entry for H.264 first frame",
                 ));
             };
-            sps = sps_list
-                .first()
-                .ok_or_else(|| crate::Error::new("missing H.264 SPS in sample entry"))?
-                .to_vec();
-            pps = pps_list
-                .first()
-                .ok_or_else(|| crate::Error::new("missing H.264 PPS in sample entry"))?
-                .to_vec();
+            sps = match in_frame.sps {
+                Some(sps) => sps.to_vec(),
+                None => sps_list
+                    .first()
+                    .ok_or_else(|| crate::Error::new("missing H.264 SPS in sample entry"))?
+                    .to_vec(),
+            };
+            pps = match in_frame.pps {
+                Some(pps) => pps.to_vec(),
+                None => pps_list
+                    .first()
+                    .ok_or_else(|| crate::Error::new("missing H.264 PPS in sample entry"))?
+                    .to_vec(),
+            };
         }
         _ => unreachable!(),
     }
@@ -311,6 +329,12 @@ fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8
         )));
     }
 
+    // フレームデータ (AVCC 形式) 内の VPS / SPS / PPS を優先し、無ければ sample_entry に
+    // フォールバックする。hev1 は in-band パラメータセット変化が仕様準拠の正規パターンで、
+    // キーフレームのフレームデータ内に VPS / SPS / PPS が含まれるため、sample_entry だけでなく
+    // フレームデータも参照して再初期化を判定する。
+    let in_frame = extract_h265_vps_sps_pps_from_avcc(&frame.data)?;
+
     let hvcc = match frame.sample_entry.as_ref().map(|e| e.get()) {
         Some(SampleEntry::Hev1(b)) => &b.hvcc_box,
         Some(SampleEntry::Hvc1(b)) => &b.hvcc_box,
@@ -332,6 +356,17 @@ fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8
             _ => {}
         }
     }
+
+    if let Some(v) = in_frame.vps {
+        vps = v;
+    }
+    if let Some(s) = in_frame.sps {
+        sps = s;
+    }
+    if let Some(p) = in_frame.pps {
+        pps = p;
+    }
+
     if vps.is_empty() {
         return Err(crate::Error::new("missing H.265 VPS"));
     }
@@ -343,4 +378,319 @@ fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8
     }
 
     Ok((vps, sps, pps))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::video::VideoFrameSize;
+
+    // AVCC 形式のフレームデータを構築するヘルパー
+    // 各 NALU を 4 バイト長プレフィックス付きで連結する
+    fn avcc_data(nalus: &[&[u8]]) -> Vec<u8> {
+        let mut data = Vec::new();
+        for nalu in nalus {
+            data.extend_from_slice(&(nalu.len() as u32).to_be_bytes());
+            data.extend_from_slice(nalu);
+        }
+        data
+    }
+
+    // ffmpeg + libx265 で生成した実機 H.265 ストリームから抽出した VPS / SPS / PPS
+    // 生成コマンド: `ffmpeg -f lavfi -i color=c=blue:s=640x480:d=1:r=25 -c:v libx265 -x265-params repeat-headers=1 out.mp4`
+    const H265_VPS_640X480: &[u8] = &[
+        0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00,
+        0x03, 0x00, 0x00, 0x03, 0x00, 0x5a, 0x95, 0x94, 0x09,
+    ];
+    const H265_SPS_640X480: &[u8] = &[
+        0x42, 0x01, 0x01, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00, 0x03, 0x00, 0x00,
+        0x03, 0x00, 0x5a, 0xa0, 0x05, 0x02, 0x01, 0xe1, 0x65, 0x95, 0x95, 0x29, 0x30, 0xbc, 0x05,
+        0xa0, 0x20, 0x00, 0x00, 0x03, 0x00, 0x20, 0x00, 0x00, 0x03, 0x03, 0x21,
+    ];
+    const H265_PPS_640X480: &[u8] = &[0x44, 0x01, 0xc0, 0x73, 0xc1, 0x89];
+
+    // ffmpeg + libx265 で生成した実機 H.265 ストリームから抽出した VPS / SPS / PPS (320x320)
+    // 生成コマンド: `ffmpeg -f lavfi -i color=c=red:s=320x320:d=1:r=25 -c:v libx265 -qp 40 -x265-params repeat-headers=1:bframes=0 out.mp4`
+    // PPS は QP 違い (init_qp_minus26) で 640x480 側と差別化する
+    const H265_VPS_320X320: &[u8] = &[
+        0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00,
+        0x03, 0x00, 0x00, 0x03, 0x00, 0x3c, 0xba, 0x02, 0x40,
+    ];
+    const H265_SPS_320X320: &[u8] = &[
+        0x42, 0x01, 0x01, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00, 0x03, 0x00, 0x00,
+        0x03, 0x00, 0x3c, 0xa0, 0x0a, 0x08, 0x05, 0x05, 0x96, 0xe9, 0x29, 0x30, 0xbc, 0x05, 0xa0,
+        0x20, 0x00, 0x00, 0x03, 0x00, 0x20, 0x00, 0x00, 0x03, 0x03, 0x21,
+    ];
+    const H265_PPS_320X320: &[u8] = &[0x44, 0x01, 0xc0, 0x71, 0x83, 0x12];
+
+    // ffmpeg + libx264 で生成した実機 H.264 ストリームから抽出した SPS / PPS
+    // 生成コマンド: `ffmpeg -f lavfi -i color=c=blue:s=320x240:d=1:r=25 -c:v libx264 -profile:v baseline -qp 20 -f h264 out.h264`
+    // PPS は QP 違い (pic_init_qp_minus26) で sample_entry 側 (0x68 0xce 0x06 0xe2) と差別化する
+    const H264_SPS_320X240: &[u8] = &crate::video::h264::tests::SPS_320X240;
+    const H264_PPS_320X240: &[u8] = &[0x68, 0xce, 0x06, 0xf2];
+
+    fn make_video_frame(
+        format: VideoFormat,
+        data: Vec<u8>,
+        sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
+    ) -> VideoFrame {
+        VideoFrame {
+            data,
+            format,
+            keyframe: true,
+            size: Some(VideoFrameSize {
+                width: 320,
+                height: 240,
+            }),
+            timestamp: std::time::Duration::ZERO,
+            sample_entry,
+        }
+    }
+
+    #[test]
+    fn get_h264_sps_pps_prefers_sps_pps_in_frame() -> crate::Result<()> {
+        // フレームデータ内の SPS / PPS が sample_entry の avcC より優先されること
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
+            &[
+                &crate::video::h264::tests::SPS_1920X1080_ANNEXB[..],
+                &[0, 0, 0, 1, 0x68, 0xce, 0x06, 0xe2][..],
+            ]
+            .concat(),
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H264,
+            avcc_data(&[H264_SPS_320X240, H264_PPS_320X240, &[0x65, 0x88]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (sps, pps) = get_h264_sps_pps(&frame)?;
+        assert_eq!(sps, H264_SPS_320X240, "フレーム内の SPS が優先されること");
+        assert_eq!(pps, H264_PPS_320X240, "フレーム内の PPS が優先されること");
+        Ok(())
+    }
+
+    #[test]
+    fn get_h264_sps_pps_falls_back_to_sample_entry() -> crate::Result<()> {
+        // フレームデータ内に SPS / PPS が無い場合は sample_entry の avcC にフォールバックすること
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
+            &[
+                &crate::video::h264::tests::SPS_320X240_ANNEXB[..],
+                &[0, 0, 0, 1, 0x68, 0xce, 0x06, 0xe2][..],
+            ]
+            .concat(),
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H264,
+            avcc_data(&[&[0x65, 0x88]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (sps, pps) = get_h264_sps_pps(&frame)?;
+        assert_eq!(
+            sps,
+            crate::video::h264::tests::SPS_320X240,
+            "sample_entry の SPS にフォールバックすること"
+        );
+        assert_eq!(
+            pps,
+            &[0x68, 0xce, 0x06, 0xe2][..],
+            "sample_entry の PPS にフォールバックすること"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn get_h264_sps_pps_mixes_frame_sps_and_sample_entry_pps() -> crate::Result<()> {
+        // フレームデータ内に SPS のみ存在し、PPS は sample_entry の avcC にフォールバックすること
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
+            &[
+                &crate::video::h264::tests::SPS_1920X1080_ANNEXB[..],
+                &[0, 0, 0, 1, 0x68, 0xce, 0x06, 0xe2][..],
+            ]
+            .concat(),
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H264,
+            avcc_data(&[H264_SPS_320X240, &[0x65, 0x88]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (sps, pps) = get_h264_sps_pps(&frame)?;
+        assert_eq!(sps, H264_SPS_320X240, "フレーム内の SPS が優先されること");
+        assert_eq!(
+            pps,
+            &[0x68, 0xce, 0x06, 0xe2][..],
+            "PPS は sample_entry にフォールバックすること"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn get_h264_sps_pps_mixes_frame_pps_and_sample_entry_sps() -> crate::Result<()> {
+        // フレームデータ内に PPS のみ存在し、SPS は sample_entry の avcC にフォールバックすること
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
+            &[
+                &crate::video::h264::tests::SPS_1920X1080_ANNEXB[..],
+                &[0, 0, 0, 1, 0x68, 0xce, 0x06, 0xe2][..],
+            ]
+            .concat(),
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H264,
+            avcc_data(&[H264_PPS_320X240, &[0x65, 0x88]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (sps, pps) = get_h264_sps_pps(&frame)?;
+        assert_eq!(
+            sps,
+            crate::video::h264::tests::SPS_1920X1080,
+            "SPS は sample_entry にフォールバックすること"
+        );
+        assert_eq!(pps, H264_PPS_320X240, "フレーム内の PPS が優先されること");
+        Ok(())
+    }
+
+    #[test]
+    fn get_h264_sps_pps_returns_err_without_sample_entry() {
+        // sample_entry が無い場合は Err を返すこと
+        let frame = make_video_frame(VideoFormat::H264, avcc_data(&[&[0x65, 0x88]]), None);
+        assert!(get_h264_sps_pps(&frame).is_err());
+    }
+
+    #[test]
+    fn get_h265_vps_sps_pps_prefers_parameter_sets_in_frame() -> crate::Result<()> {
+        // フレームデータ内の VPS / SPS / PPS が sample_entry の hvcc より優先されること
+        // sample_entry には 640x480、フレームデータ内には 320x320 (QP 違いで PPS も差別化) を入れ、
+        // 優先順位を値の違いで検出できるようにする
+        let sample_entry = crate::video::h265::h265_sample_entry_from_annexb(
+            &[
+                &[0, 0, 0, 1][..],
+                H265_VPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_SPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_PPS_640X480,
+            ]
+            .concat(),
+            crate::video::FrameRate::FPS_30,
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H265,
+            avcc_data(&[
+                H265_VPS_320X320,
+                H265_SPS_320X320,
+                H265_PPS_320X320,
+                &[0x26, 0x01],
+            ]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (vps, sps, pps) = get_h265_vps_sps_pps(&frame)?;
+        assert_eq!(vps, H265_VPS_320X320, "フレーム内の VPS が優先されること");
+        assert_eq!(sps, H265_SPS_320X320, "フレーム内の SPS が優先されること");
+        assert_eq!(pps, H265_PPS_320X320, "フレーム内の PPS が優先されること");
+        Ok(())
+    }
+
+    #[test]
+    fn get_h265_vps_sps_pps_falls_back_to_sample_entry() -> crate::Result<()> {
+        // フレームデータ内に VPS / SPS / PPS が無い場合は sample_entry の hvcc にフォールバックすること
+        let sample_entry = crate::video::h265::h265_sample_entry_from_annexb(
+            &[
+                &[0, 0, 0, 1][..],
+                H265_VPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_SPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_PPS_640X480,
+            ]
+            .concat(),
+            crate::video::FrameRate::FPS_30,
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H265,
+            avcc_data(&[&[0x26, 0x01]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (vps, sps, pps) = get_h265_vps_sps_pps(&frame)?;
+        assert_eq!(
+            vps, H265_VPS_640X480,
+            "sample_entry の VPS にフォールバックすること"
+        );
+        assert_eq!(
+            sps, H265_SPS_640X480,
+            "sample_entry の SPS にフォールバックすること"
+        );
+        assert_eq!(
+            pps, H265_PPS_640X480,
+            "sample_entry の PPS にフォールバックすること"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn get_h265_vps_sps_pps_mixes_frame_vps_sps_and_sample_entry_pps() -> crate::Result<()> {
+        // フレームデータ内に VPS / SPS のみ存在し、PPS は sample_entry の hvcc にフォールバックすること
+        let sample_entry = crate::video::h265::h265_sample_entry_from_annexb(
+            &[
+                &[0, 0, 0, 1][..],
+                H265_VPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_SPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_PPS_640X480,
+            ]
+            .concat(),
+            crate::video::FrameRate::FPS_30,
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H265,
+            avcc_data(&[H265_VPS_320X320, H265_SPS_320X320, &[0x26, 0x01]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (vps, sps, pps) = get_h265_vps_sps_pps(&frame)?;
+        assert_eq!(vps, H265_VPS_320X320, "フレーム内の VPS が優先されること");
+        assert_eq!(sps, H265_SPS_320X320, "フレーム内の SPS が優先されること");
+        assert_eq!(
+            pps, H265_PPS_640X480,
+            "PPS は sample_entry にフォールバックすること"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn get_h265_vps_sps_pps_mixes_frame_pps_and_sample_entry_vps_sps() -> crate::Result<()> {
+        // フレームデータ内に PPS のみ存在し、VPS / SPS は sample_entry の hvcc にフォールバックすること
+        let sample_entry = crate::video::h265::h265_sample_entry_from_annexb(
+            &[
+                &[0, 0, 0, 1][..],
+                H265_VPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_SPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_PPS_640X480,
+            ]
+            .concat(),
+            crate::video::FrameRate::FPS_30,
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H265,
+            avcc_data(&[H265_PPS_320X320, &[0x26, 0x01]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (vps, sps, pps) = get_h265_vps_sps_pps(&frame)?;
+        assert_eq!(
+            vps, H265_VPS_640X480,
+            "VPS は sample_entry にフォールバックすること"
+        );
+        assert_eq!(
+            sps, H265_SPS_640X480,
+            "SPS は sample_entry にフォールバックすること"
+        );
+        assert_eq!(pps, H265_PPS_320X320, "フレーム内の PPS が優先されること");
+        Ok(())
+    }
+
+    #[test]
+    fn get_h265_vps_sps_pps_returns_err_without_sample_entry() {
+        // sample_entry が無い場合は Err を返すこと
+        let frame = make_video_frame(VideoFormat::H265, avcc_data(&[&[0x26, 0x01]]), None);
+        assert!(get_h265_vps_sps_pps(&frame).is_err());
+    }
 }

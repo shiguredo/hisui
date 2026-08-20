@@ -1,14 +1,11 @@
-use std::{path::Path, path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 use hisui::{
     Error, MediaPipeline, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     mp4::writer::{Mp4Writer, Mp4WriterOptions},
     sample_entry::SharedSampleEntry,
-    sora::recording_layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
-    sora::recording_layout_region::{Grid, Region},
-    sora::recording_metadata::{SourceId, SourceInfo},
-    types::{CodecName, EvenUsize, PixelPosition},
+    types::EvenUsize,
     video::{FrameRate, VideoFormat, VideoFrame},
 };
 use shiguredo_mp4::{
@@ -22,14 +19,13 @@ const VIDEO_TRACK_ID: &str = "writer_test_video";
 #[test]
 fn write_audio_only_mp4() -> hisui::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new()?;
-    let source = source(0, secs(0), secs(60));
-    let layout = layout(std::slice::from_ref(&source), &[]);
+    let source = source(secs(0));
     let audio_samples = (0..60)
         .map(|i| audio_data(&source, i, secs(1)))
         .collect::<Vec<_>>();
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(layout.mp4_writer_options()),
+        Some(mp4_writer_options()),
         Some(audio_samples),
         None,
     )?;
@@ -60,14 +56,13 @@ fn write_audio_only_mp4() -> hisui::Result<()> {
 #[test]
 fn write_video_only_mp4() -> hisui::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new()?;
-    let source = source(0, secs(0), secs(60));
-    let layout = layout(&[], std::slice::from_ref(&source));
+    let source = source(secs(0));
     let video_frames = (0..60)
         .map(|i| video_frame(&source, i, secs(1)))
         .collect::<Vec<_>>();
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(layout.mp4_writer_options()),
+        Some(mp4_writer_options()),
         None,
         Some(video_frames),
     )?;
@@ -98,12 +93,8 @@ fn write_video_only_mp4() -> hisui::Result<()> {
 #[test]
 fn write_video_and_audio_mp4() -> hisui::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new()?;
-    let audio_source = source(0, secs(0), secs(60));
-    let video_source = source(1, secs(0), secs(60));
-    let layout = layout(
-        std::slice::from_ref(&audio_source),
-        std::slice::from_ref(&video_source),
-    );
+    let audio_source = source(secs(0));
+    let video_source = source(secs(0));
 
     let audio_samples = (0..60)
         .map(|i| audio_data(&audio_source, i, secs(1)))
@@ -113,7 +104,7 @@ fn write_video_and_audio_mp4() -> hisui::Result<()> {
         .collect::<Vec<_>>();
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(layout.mp4_writer_options()),
+        Some(mp4_writer_options()),
         Some(audio_samples),
         Some(video_frames),
     )?;
@@ -146,10 +137,9 @@ fn write_video_and_audio_mp4() -> hisui::Result<()> {
 #[test]
 fn no_video_and_audio_mp4() -> hisui::Result<()> {
     let output_file_path = tempfile::NamedTempFile::new()?;
-    let layout = layout(&[], &[]);
     let entries = run_writer_with_pipeline(
         output_file_path.path(),
-        Some(layout.mp4_writer_options()),
+        Some(mp4_writer_options()),
         None,
         None,
     )?;
@@ -400,78 +390,15 @@ fn writer_duration(
         .ok_or_else(|| Error::new(format!("missing writer duration metric: {metric_name}")))
 }
 
-fn layout(audio_sources: &[SourceInfo], video_sources: &[SourceInfo]) -> Layout {
-    Layout {
-        audio_source_ids: audio_sources.iter().map(|s| s.id.clone()).collect(),
-        video_regions: if video_sources.is_empty() {
-            Vec::new()
-        } else {
-            vec![region(video_sources)]
-        },
-        sources: audio_sources
-            .iter()
-            .chain(video_sources.iter())
-            .map(|s| {
-                (
-                    s.id.clone(),
-                    AggregatedSourceInfo {
-                        id: s.id.clone(),
-                        start_timestamp: s.start_timestamp,
-                        stop_timestamp: s.stop_timestamp,
-                        audio: true,
-                        video: true,
-                        format: Default::default(),
-                        media_paths: Default::default(),
-                    },
-                )
-            })
-            .collect(),
+/// テスト用の `Mp4WriterOptions`
+///
+/// 以前はレイアウト (`Layout::mp4_writer_options`) から生成していたが、
+/// 録画機能の削除に伴い直接生成する形へ置き換えた。
+/// 値は旧レイアウトと同じく「60 秒・1 FPS」を表す。
+fn mp4_writer_options() -> Mp4WriterOptions {
+    Mp4WriterOptions {
+        duration: secs(60),
         frame_rate: FrameRate::FPS_1,
-
-        // 以下のフィールドはテストで使われないので、適当な値を設定しておく
-        trim_spans: Default::default(),
-        base_path: PathBuf::from(""),
-        resolution: Resolution::new(16, 16).expect("infallible"),
-        audio_codec: CodecName::Opus,
-        video_codec: CodecName::Vp8,
-        audio_bitrate: None,
-        video_bitrate: None,
-        encode_params: Default::default(),
-        decode_params: Default::default(),
-        video_encode_engines: None,
-        video_decode_engines: None,
-    }
-}
-
-fn region(video_sources: &[SourceInfo]) -> Region {
-    Region {
-        grid: Grid {
-            assigned_sources: video_sources
-                .iter()
-                .map(|source| {
-                    (
-                        source.id.clone(),
-                        AssignedSource {
-                            cell_index: 0,
-                            priority: 0,
-                        },
-                    )
-                })
-                .collect(),
-            rows: 0,
-            columns: 0,
-            cell_width: EvenUsize::truncating_new(4),
-            cell_height: EvenUsize::truncating_new(4),
-        },
-        source_ids: video_sources.iter().map(|s| s.id.clone()).collect(),
-        width: EvenUsize::truncating_new(16),
-        height: EvenUsize::truncating_new(16),
-        position: PixelPosition::default(),
-        top_border_pixels: EvenUsize::default(),
-        left_border_pixels: EvenUsize::default(),
-        inner_border_pixels: EvenUsize::truncating_new(2),
-        z_pos: 0,
-        background_color: [0, 0, 0],
     }
 }
 
@@ -479,20 +406,16 @@ fn secs(timestamp: u64) -> Duration {
     Duration::from_secs(timestamp)
 }
 
-fn source(id: usize, start_timestamp: Duration, stop_timestamp: Duration) -> SourceInfo {
-    SourceInfo {
-        id: SourceId::new(&id.to_string()),
-        start_timestamp,
-        stop_timestamp,
-
-        // 以下はダミー値
-        audio: true,
-        video: true,
-        format: Default::default(),
-    }
+/// テスト用のソースタイミング情報
+struct TestSource {
+    start_timestamp: Duration,
 }
 
-fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioFrame {
+fn source(start_timestamp: Duration) -> TestSource {
+    TestSource { start_timestamp }
+}
+
+fn audio_data(source: &TestSource, i: usize, duration: Duration) -> AudioFrame {
     AudioFrame {
         data: vec![0], // 中身はなんでもいい
         format: AudioFormat::I16Be,
@@ -512,7 +435,7 @@ fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioFrame {
     }
 }
 
-fn video_frame(source: &SourceInfo, i: usize, duration: Duration) -> VideoFrame {
+fn video_frame(source: &TestSource, i: usize, duration: Duration) -> VideoFrame {
     VideoFrame {
         data: vec![0], // 中身はなんでもいい
         format: VideoFormat::I420,

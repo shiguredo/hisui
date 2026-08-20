@@ -17,9 +17,9 @@ hisui のリアルタイム動作 (WebRTC / obsws / rtmp 等の realtime 経路)
 1. **全 encoder に共通の低遅延パラメータを強制上書きする** 機構 (`look_ahead_distance = 0` / `lag_in_frames = 0` 等で encoder 内部の warm-up を消す)
 2. **`IN_FLIGHT_LIMIT` の可変化** (`effective_limit = min(realtime_limit, encoder_limit)` で encoder 種別と経路依存に決める)
 
-0085 で導入された in-flight バックプレッシャーは、 現状応急処置として nvcodec のみに適用されている (`VideoEncoderInner::requires_backpressure` が nvcodec のみ true)。 これは libvpx VP9 (`lag_in_frames` native default ~25) / svt_av1 (`look_ahead_distance` native default ~33) / video_toolbox が warm-up 型で、 一律 `LIMIT = 3` を適用すると deadlock するための応急処置。 本 issue でこの応急処置を解消し、 encoder 種別と経路 (realtime / compose) に応じた LIMIT を計算して bp guard を全 encoder で有効化する。
+0085 で導入された in-flight バックプレッシャーは、 現状応急処置として nvcodec のみに適用されている (`VideoEncoderInner::requires_backpressure` が nvcodec のみ true)。 これは libvpx VP9 (`lag_in_frames` native default ~25) / svt_av1 (`look_ahead_distance` native default ~33) / video_toolbox が warm-up 型で、 一律 `LIMIT = 3` を適用すると deadlock するための応急処置。 本 issue でこの応急処置を解消し、 encoder 種別に応じた LIMIT を計算して bp guard を全 encoder で有効化する。
 
-依存: issues/0085 (in-flight bp) 完了後に着手する。 0085 の応急処置を前提とする作業なので順序依存が明確。
+依存: issues/0085 (in-flight bp、 closed)。 0085 の応急処置を前提とする作業なので順序依存が明確。
 
 ## 優先度根拠
 
@@ -33,14 +33,17 @@ Medium。 リアルタイム経路の品質確保に必要だが、 依存先 (0
 
 ## 現状
 
-hisui の encoder パラメータ override 経路は encoder ごとに個別:
+hisui の encoder パラメータは `EncodeConfig::default()` (`src/encoder.rs`) で encoder ごとの既定値をまとめており、 呼出経路による品質パラメータの上書きは存在しない (キーフレーム間隔のみ `encode_config_with_keyframe_interval` で上書きされる):
 
-- svt_av1: `src/sora/recording_encoder_svt_av1_params.rs` で JSON config 経由の `look_ahead_distance` 指定 (主に compose 用)
-- nvcodec: `src/sora/recording_encoder_nvcodec_params.rs` で個別設定
-- video_toolbox: 個別設定
-- libvpx / openh264: 個別設定
+- svt_av1: 既定値で `look_ahead_distance = 13` を指定
+- nvcodec: 既定値で個別設定
+- video_toolbox / libvpx / openh264: 既定値のみ
 
-各 encoder は「呼出経路が realtime か compose か」を判別する情報を持たず、 統一的な realtime プロファイル定義もない。
+各 encoder は呼出経路 (realtime) を判別する情報を持たず、 統一的な realtime プロファイル定義もない。
+
+なお、 `EncodeConfig::default()` の各値は録画機能 (compose) 削除時に旧既定レイアウト (当時存在した `layout-examples/compose-default.jsonc`) の値を引き継いだもので、 リアルタイム用途の観点で最適化されていない。 既定値そのものの見直しも本 issue の対象とする。
+
+また、 既定値を検証するテストは現状存在しない (旧 compose の e2e テスト削除による)。 値の見直し時には、 既定値の回帰を検出するテストの追加を併せて行うこと。
 
 0085 応急処置状態 (本 issue で解消対象):
 
@@ -75,13 +78,9 @@ effective_limit = min(realtime_limit, encoder_limit)
 **realtime_limit** (経路依存):
 
 - **realtime 経路**: 1 or 2 (低遅延優先、 issues/0086 の frame skip とセット)。 具体値は polish + 実機計測で確定
-- **compose 経路**: `usize::MAX` (encoder_limit に完全に委ねる)
 
 **effective_limit の帰結**:
 
-- compose + nvcodec: 3 (buffer full 回避)
-- compose + libvpx VP8 / openh264: `usize::MAX` (bp guard 事実上無効)
-- compose + libvpx VP9 / svt_av1 (warm-up あり): 26 / 34 相当 (deadlock 回避、 warm-up 許容)
 - realtime + nvcodec: 1 or 2 (低遅延)
 - realtime + 他 encoder (warm-up 上書き済み): 1 or 2 (低遅延、 下記の encoder パラメータ強制上書きと連動)
 
@@ -115,10 +114,6 @@ polish で確定する。 候補:
 - `src/encoder.rs::VideoEncoder::run` の guard を `in_flight < effective_limit` に修正 (`effective_limit = min(realtime_limit, encoder_limit)`)
 - `src/encoder.rs::VideoEncoder::IN_FLIGHT_LIMIT` const 削除 (または encoder_limit の nvcodec 分岐に移す)
 
-### compose 経路への影響なし
-
-compose では品質優先パラメータを維持する。 realtime プロファイルの適用は realtime 経路の call site に限定する。 `effective_limit` の compose 経路挙動は `realtime_limit = usize::MAX` を返すことで担保する。
-
 ## 完了条件
 
 polish で確定。 主要項目 (骨組み):
@@ -130,7 +125,7 @@ polish で確定。 主要項目 (骨組み):
 - realtime flag の伝播経路 (polish で確定)
 - realtime 経路で encoder パラメータ強制上書き
 - `VideoEncoder::run` の guard を `effective_limit = min(realtime_limit, encoder_limit)` ベースに修正
-- integration test 追加 (compose + libvpx VP9 で deadlock しないこと、 realtime + 全 encoder で低遅延化されること)
+- integration test 追加 (realtime + 全 encoder で低遅延化されること)
 - cargo (fmt / check / clippy / test) がすべて通る
 
 ## 解決方法
@@ -143,6 +138,6 @@ polish で確定。 リアルタイム経路の挙動変更として `[UPDATE]` 
 
 ## 関連
 
-- issues/0085 (`feature/refactor-encoder-inflight-backpressure`): 依存先。 本 issue は 0085 完了後に着手する。 0085 の応急処置 (`VideoEncoderInner::requires_backpressure`) を本 issue 完了時に削除する
+- issues/0085 (`feature/refactor-encoder-inflight-backpressure`、 closed): 依存先 (実装は develop に merge 済み)。 0085 の応急処置 (`VideoEncoderInner::requires_backpressure`) を本 issue 完了時に削除する
 - issues/0086 (`feature/add-realtime-video-mixer-skip-on-encoder-backpressure`): 同じく 0085 完了後の後続。 0086 の frame skip は bp guard が動作している前提のため、 本 issue で全 encoder に bp guard を戻すことで 0086 の効果が全 encoder に及ぶようになる
 - closed/0080 (2026-07-21 closed): 0085 の前身。 背景理解に参照

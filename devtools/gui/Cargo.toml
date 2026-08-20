@@ -21,7 +21,7 @@ image = "=0.25.1"
 # JSON のパース・生成
 nojson = { workspace = true }
 # I420 から RGBA への色変換
-shiguredo_libyuv = "=2026.2.0-canary.1"
+shiguredo_libyuv = "=2026.2.0-canary.2"
 # WebRTC
 shiguredo_webrtc = { workspace = true }
 # 非同期処理

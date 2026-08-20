@@ -10,8 +10,6 @@ publish = false
 # PBT 対象である hisui 本体を path 依存で参照する
 # prop_ml_audio が `src/ml/audio/` (candle feature ゲート下) に触るため candle feature を有効化する
 hisui = { path = "..", features = ["candle"] }
-# JSON Lines のラウンドトリップ検証用
-nojson = { workspace = true }
 # prop_h264_sps PBT で SampleEntry を直接構築するため
 shiguredo_mp4 = { workspace = true }
 # prop_aac_rtp PBT で RtpPacket / RtpHeader を組み立てるため

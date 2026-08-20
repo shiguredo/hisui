@@ -54,9 +54,6 @@ fn main() -> noargs::Result<()> {
     // サブコマンドで分岐する。
     let matched = hisui::subcommand_inspect::try_run(&mut args, stats.clone())?
         || hisui::subcommand_list_codecs::try_run(&mut args)?
-        || hisui::sora::recording_subcommand_compose::try_run(&mut args, stats.clone())?
-        || hisui::sora::recording_subcommand_vmaf::try_run(&mut args, stats.clone())?
-        || hisui::sora::recording_subcommand_tune::try_run(&mut args)?
         || hisui::subcommand_server::try_run(&mut args, stats.clone())?
         || {
             #[cfg(feature = "candle")]

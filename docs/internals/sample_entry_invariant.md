@@ -32,11 +32,9 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 
 | ソース | ファイル | サンプルエントリー確立タイミング |
 |---|---|---|
-| MP4 ファイル | `src/mp4/reader.rs` | `stsd` ボックス読み出し時にトラックごとに確定し、各サンプルへ載せる |
-| WebM ファイル | `src/webm/reader.rs` | `Tracks` 要素読み出し時にトラックごとに確定し、各サンプルへ載せる |
+| MP4 ファイル | `src/mp4/reader.rs` / `src/mp4/sync_reader.rs` | `stsd` ボックス読み出し時にトラックごとに確定し、各サンプルへ載せる |
 | RTSP 経路 | `src/rtsp/subscriber.rs` | SDP の `sprop-parameter-sets` または inline SPS / PPS / IDR 揃いで確定し、以降のフレームへ載せる |
 | SRT 経路 | `src/srt/inbound_endpoint.rs` | AAC は `AudioSpecificConfig`、映像は AnnexB の SPS / PPS / IDR 揃いで確定し、以降のフレームへ載せる |
-| Sora 録画 MP4 | `src/sora/recording_mp4_reader.rs` | `stsd` ボックス読み出し時にトラックごとに確定し、各サンプルへ載せる（MP4 リーダーと同じ経路） |
 
 ### エンコーダ（生フレームを符号化して圧縮フレームを生成）
 
@@ -56,13 +54,12 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 リーダー側で SPS / PPS や `AudioSpecificConfig` 等のサンプルエントリー素材が揃わない場合は、**圧縮フレームを生成しない**ことで不変条件を保つ。
 具体例:
 
-- WebM リーダーで音声トラックが存在しない場合は圧縮 `AudioFrame` を生成しない（`track_number` 不一致でスキップ）
 - RTSP 経路で SPS / PPS が未到来の場合はフレームをバッファリングして待機し、揃ってから圧縮 `VideoFrame` を生成する
 - SRT 経路で AnnexB の SPS / PPS が未到来の場合も同様にバッファリング
 
 エンコーダ側で「最初の keyframe より前に出力が出る」可能性を持つもの（openh264 / VideoToolbox の H.264 / H.265 経路）は、sample_entry が確定する前に出力フレームを組み立てる事態をエンコーダ Err として fail-fast 停止する。openh264 / VTCompressionSession の通常動作では「最初の出力フレームが必ず keyframe で SPS / PPS (H.265 は VPS も) が同梱される」ため、この Err 経路には到達しない。到達した場合はエンコーダの挙動が暗黙の前提から外れている異常状態を示す。
 
-なお `h265_sample_entry` 自体は空 VPS / SPS / PPS リストでも `Ok` を返す実装のため、不変条件は呼び出し側 (encoder 等) でガードして確立する。RTSP / WebM など他の呼び出し経路では既に素材揃いを待ってから呼ぶ設計のため、`h265_sample_entry` 内部に空入力チェックを追加する必要はない。
+なお `h265_sample_entry` 自体は空 VPS / SPS / PPS リストでも `Ok` を返す実装のため、不変条件は呼び出し側 (encoder 等) でガードして確立する。RTSP など他の呼び出し経路では既に素材揃いを待ってから呼ぶ設計のため、`h265_sample_entry` 内部に空入力チェックを追加する必要はない。
 
 本不変条件は単に `sample_entry: Some` であることだけでなく、**有効な sample_entry が確立されていること** を意味する。空 NALU 配列で構築された壊れた `hvcC` は型レベルでは `Some` を満たすが、意味的不変条件は満たさない。各入力経路は意味レベルで不変条件を確立する責務を負う。
 

@@ -8,7 +8,6 @@
 ## この文書の対象範囲
 
 - 主対象は `media_pipeline` と `obsws`
-- `compose` は共通基盤の利用例としてのみ扱う
 - `docs/obsws/` にあるプロトコル詳細や Request 単位の仕様は扱わない
 - README に記載している将来構想の詳細設計は扱わない
 
@@ -20,7 +19,6 @@ Hisui の実装は、大まかには以下の 3 層に分かれます。
   - `src/main.rs` で CLI サブコマンドを振り分ける
 - 制御層
   - `obsws` のように外部 API やセッションを扱い、内部状態を調停する
-  - `compose` のようにバッチ処理を組み立てる
 - メディア処理基盤
   - `media_pipeline` が processor 登録、 track 公開、 subscribe、起動順制御を担う
   - 各 source / mixer / encoder / writer はこの基盤の上で動く
@@ -28,7 +26,6 @@ Hisui の実装は、大まかには以下の 3 層に分かれます。
 ```mermaid
 flowchart TD
     main["src/main.rs"]
-    compose["compose サブコマンド"]
     obsws_server["obsws::server"]
     obsws_coord["obsws::coordinator"]
     bootstrap["/bootstrap endpoint"]
@@ -36,18 +33,16 @@ flowchart TD
     processors["source / mixer / encoder / writer"]
     external["外部入力 / 外部出力"]
 
-    main --> compose
     main --> obsws_server
     obsws_server --> obsws_coord
     obsws_server --> bootstrap
-    compose --> pipeline
     obsws_coord --> pipeline
     bootstrap --> pipeline
     pipeline --> processors
     processors --> external
 ```
 
-重要なのは、 `compose` や `obsws` がそれぞれ別個にメディア処理を完結させているわけではない点です。
+重要なのは、 `obsws` が単独でメディア処理を完結させているわけではない点です。
 実際の処理は共通基盤である `media_pipeline` の上に組み立てられます。
 
 ## 主要レイヤーの責務
@@ -59,11 +54,9 @@ flowchart TD
 
 現時点では、以下のような役割分担になっています。
 
-- `compose`
-  - Sora 録画ファイルを入力として処理パイプラインを組み立てる
 - `obsws`
   - 実験的な OBS WebSocket 互換サーバーを起動する
-- `inspect` / `list-codecs` / `tune` / `vmaf`
+- `inspect` / `list-codecs`
   - 個別用途のサブコマンドとして独立している
 
 ### 2. `media_pipeline`
@@ -168,14 +161,6 @@ sequenceDiagram
 ここで重要なのは、 scene や input の論理状態と、 processor / track の実体を `coordinator` が橋渡ししている点です。
 `session` は API の入口であり、メディアグラフの組み替え判断は `coordinator` 側に寄せています。
 
-### `compose` の位置づけ
-
-`compose` はバッチ処理用の制御層です。
-Sora 録画ファイルを読み取り、レイアウトに応じて reader、 decoder、 mixer、 encoder、 writer を組み立てます。
-
-ただし、構造上は `obsws` と同じく `media_pipeline` の利用者です。
-そのため、 Hisui の全体アーキテクチャを理解する時に先に追うべきなのは `compose` 固有のロジックではなく、共通基盤である `media_pipeline` と、それをリアルタイム制御に接続する `obsws` 側です。
-
 ## 設計上の重要ポイント
 
 ### actor / handle ベースで制御する
@@ -233,13 +218,11 @@ Hisui の `obsws` 実装では、この 2 つを分離して持ち、 `coordinat
   - 共通統計基盤と `/metrics` 公開の仕組み
 - `docs/internals/bootstrap.md`
   - `/bootstrap` endpoint と WebRTC P2P セッション管理の仕組み
-- `docs/command_compose.md`
-  - `compose` の利用方法と公開仕様
 - `src/obsws/source/`
   - input kind ごとの source 実装
 
 ## まとめ
 
-Hisui の全体像を短く言うと、 `media_pipeline` を共通基盤として持ち、その上に `obsws` や `compose` などの制御層を載せる構成です。
+Hisui の全体像を短く言うと、 `media_pipeline` を共通基盤として持ち、その上に `obsws` などの制御層を載せる構成です。
 
 新しい機能を追加する時は、まず「これは API / 状態管理の変更なのか」「processor の追加なのか」「track 接続の変更なのか」を切り分けると、修正箇所を判断しやすくなります。

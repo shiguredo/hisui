@@ -1,11 +1,13 @@
+#[cfg(feature = "nvcodec")]
+use hisui::types::EngineName;
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
-    sora::recording_mp4_reader::Mp4VideoReader,
+    mp4::sync_reader::Mp4VideoReader,
     video::VideoFrame,
 };
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
-use hisui::{audio::AudioFrame, decoder::AudioDecoder, sora::recording_mp4_reader::Mp4AudioReader};
+use hisui::{audio::AudioFrame, decoder::AudioDecoder, mp4::sync_reader::Mp4AudioReader};
 use shiguredo_openh264::Openh264Library;
 
 const VIDEO_INPUT_TRACK_ID: &str = "decoder_test_video_input";
@@ -229,6 +231,154 @@ where
 
     Ok(())
 }
+
+/// 1 トラック内でキーフレーム毎に解像度が変わる多エントリ stsd の MP4 を nvcodec デコーダーで
+/// デコードし、sample_entry 変化に伴う parameter_sets キャッシュ更新が働くことを検証する。
+///
+/// 修正前は `NvcodecDecoder` が parameter_sets を初回のみキャッシュしていたため、
+/// sample_entry の変化を検出できず、後半の解像度変化で古い SPS / PPS を frame data に
+/// prepend し続けてデコード結果が壊れていた。
+#[test]
+#[cfg(feature = "nvcodec")]
+fn h264_single_track_resolution_change_nvcodec() -> hisui::Result<()> {
+    if !shiguredo_nvcodec::is_cuda_library_available() {
+        eprintln!("skip: CUDA ライブラリが利用できない");
+        return Ok(());
+    }
+
+    let reader = Mp4VideoReader::new("testdata/archive-h264-resolution-change.mp4")?;
+    let mut input_frames = Vec::new();
+    for input_frame in reader {
+        input_frames.push(input_frame?);
+    }
+    assert_keyframes_have_no_in_band_parameter_sets(&input_frames);
+
+    let options = VideoDecoderOptions {
+        openh264_lib: None,
+        decode_params: Default::default(),
+        engines: Some(vec![EngineName::Nvcodec]),
+    };
+    let output_frames = decode_video_frames_with_pipeline(input_frames, options)?;
+    assert_expected_resolution_sequence(&output_frames);
+    Ok(())
+}
+
+/// 1 トラック内でキーフレーム毎に解像度が変わる多エントリ stsd の MP4 を nvcodec デコーダーで
+/// デコードし、sample_entry 変化に伴う parameter_sets キャッシュ更新が働くことを検証する。
+///
+/// H.264 版 (`h264_single_track_resolution_change_nvcodec`) と同様、修正前は parameter_sets を
+/// 初回のみキャッシュしていたため、sample_entry の変化 (VPS / SPS / PPS) を検出できず、
+/// 後半の解像度変化で古いパラメータセットを frame data に prepend し続けてデコード結果が
+/// 壊れていた。本テストは H.265 の経路を end-to-end で検証する。
+#[test]
+#[cfg(feature = "nvcodec")]
+fn h265_single_track_resolution_change_nvcodec() -> hisui::Result<()> {
+    if !shiguredo_nvcodec::is_cuda_library_available() {
+        eprintln!("skip: CUDA ライブラリが利用できない");
+        return Ok(());
+    }
+
+    let reader = Mp4VideoReader::new("testdata/archive-h265-resolution-change.mp4")?;
+    let mut input_frames = Vec::new();
+    for input_frame in reader {
+        input_frames.push(input_frame?);
+    }
+    assert_keyframes_have_no_in_band_parameter_sets_h265(&input_frames);
+
+    let options = VideoDecoderOptions {
+        openh264_lib: None,
+        decode_params: Default::default(),
+        engines: Some(vec![EngineName::Nvcodec]),
+    };
+    let output_frames = decode_video_frames_with_pipeline(input_frames, options)?;
+    assert_expected_resolution_sequence(&output_frames);
+    Ok(())
+}
+
+/// テストデータの全キーフレームが in-band VPS / SPS / PPS を先頭 NAL に持たないことを検証する。
+///
+/// nvcodec デコーダーの prepend 判定は先頭 NAL 種別 (`contains_parameter_sets`) を見るため、
+/// キーフレームが VPS / SPS / PPS で始まると修正前 (`is_none()` の初回のみキャッシュ) でもテストが
+/// 通ってしまう。データ再生成等でこの前提が崩れた場合に早期検出して回帰検出力の劣化を防ぐ。
+#[cfg(feature = "nvcodec")]
+fn assert_keyframes_have_no_in_band_parameter_sets_h265(frames: &[VideoFrame]) {
+    use hisui::video::h265::{H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS};
+
+    for frame in frames.iter().filter(|f| f.keyframe) {
+        let first_nal_type = frame
+            .data
+            .get(hisui::video::h265::NALU_HEADER_LENGTH)
+            // H.265 の NAL unit type は NAL ヘッダ第 1 バイトの bit 1-6 (`contains_parameter_sets` と
+            // 同じ抽出方法。`src/decoder/nvcodec.rs` の H265 判定を参照)
+            .map(|b| (b >> 1) & 0x3F);
+        assert!(
+            !matches!(
+                first_nal_type,
+                Some(H265_NALU_TYPE_VPS) | Some(H265_NALU_TYPE_SPS) | Some(H265_NALU_TYPE_PPS)
+            ),
+            "キーフレームが in-band VPS / SPS / PPS を先頭に持つ (テストデータ前提が崩れている)"
+        );
+    }
+}
+
+/// テストデータの全キーフレームが in-band SPS / PPS を先頭 NAL に持たないことを検証する。
+///
+/// nvcodec デコーダーの prepend 判定は先頭 NAL 種別 (`contains_parameter_sets`) を見るため、
+/// キーフレームが SPS / PPS で始まると修正前 (`is_none()` の初回のみキャッシュ) でもテストが
+/// 通ってしまう。データ再生成等でこの前提が崩れた場合に早期検出して回帰検出力の劣化を防ぐ。
+#[cfg(feature = "nvcodec")]
+fn assert_keyframes_have_no_in_band_parameter_sets(frames: &[VideoFrame]) {
+    use hisui::video::h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
+
+    for frame in frames.iter().filter(|f| f.keyframe) {
+        let first_nal_type = frame
+            .data
+            .get(hisui::video::h264::NALU_HEADER_LENGTH)
+            .map(|b| b & 0x1F);
+        assert!(
+            !matches!(
+                first_nal_type,
+                Some(H264_NALU_TYPE_SPS) | Some(H264_NALU_TYPE_PPS)
+            ),
+            "キーフレームが in-band SPS / PPS を先頭に持つ (テストデータ前提が崩れている)"
+        );
+    }
+}
+
+/// 出力フレームの解像度シーケンスが期待どおりか確認するヘルパー。
+///
+/// テストデータ (archive-h264-resolution-change.mp4 / archive-h265-resolution-change.mp4) は
+/// 15 fps × 3 秒 = 45 フレームで、キーフレームが frame 0 / 15 / 30 にある:
+/// - frame 0..15  → 320x240
+/// - frame 15..30 → 224x160
+/// - frame 30..45 → 320x240
+#[cfg(feature = "nvcodec")]
+fn assert_expected_resolution_sequence(output_frames: &[VideoFrame]) {
+    let expected: Vec<(usize, usize)> = (0..15)
+        .map(|_| (320, 240))
+        .chain((0..15).map(|_| (224, 160)))
+        .chain((0..15).map(|_| (320, 240)))
+        .collect();
+
+    assert_eq!(
+        output_frames.len(),
+        expected.len(),
+        "出力フレーム数が想定と異なる (回帰検出アンカー)"
+    );
+    for (i, (frame, (expected_width, expected_height))) in
+        output_frames.iter().zip(expected.iter()).enumerate()
+    {
+        let size = frame
+            .size()
+            .expect("デコード済みフレームは size を持つはず");
+        assert_eq!(
+            (size.width, size.height),
+            (*expected_width, *expected_height),
+            "フレーム {i} の解像度が期待値と一致しない"
+        );
+    }
+}
+
 #[test]
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 fn aac_decode() -> hisui::Result<()> {

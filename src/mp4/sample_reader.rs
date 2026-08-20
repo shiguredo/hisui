@@ -158,6 +158,8 @@ impl Mp4SampleReader {
                         break;
                     }
                 }
+                // 字幕トラックは未対応のため読み飛ばす
+                TrackKind::Subtitle => {}
             }
         }
 
@@ -223,6 +225,8 @@ fn select_supported_tracks(
                     }
                 }
             }
+            // 字幕トラックは未対応のため無視する
+            TrackKind::Subtitle => {}
         }
 
         // 必要な種別のトラックがすべて確定したら、残りは読まずに打ち切る

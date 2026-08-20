@@ -7,15 +7,17 @@
 
 ```console
 $ hisui list-codecs -h
-Recording Composition Tool Hisui
+利用可能なコーデック一覧を表示します
 
 Usage: hisui ... list-codecs [OPTIONS]
 
 Options:
-  -h, --help            このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
-      --version         バージョン番号を表示します
-      --verbose         警告未満のログメッセージも出力します
-      --openh264 <PATH> OpenH264 の共有ライブラリのパス [env: HISUI_OPENH264_PATH]
+  -h, --help              このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
+      --version           バージョン番号を表示します
+      --verbose           警告未満のログメッセージも出力します
+      --emit-exit-metrics プロセス終了時に内部メトリクスを JSON Lines 形式で標準出力へ 1 行出力します [env: HISUI_EMIT_EXIT_METRICS]
+  -x, --experimental      実験的サブコマンドの有効化フラグです
+      --openh264 <PATH>   OpenH264 の共有ライブラリのパス [env: HISUI_OPENH264_PATH]
 ```
 
 ## 実行例

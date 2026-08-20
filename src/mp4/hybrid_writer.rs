@@ -91,13 +91,18 @@ impl HybridMp4Writer {
         let creation_timestamp = std::time::UNIX_EPOCH.elapsed()?;
 
         // fMP4 フラグメント生成用 muxer
-        let fmp4_muxer =
-            Fmp4SegmentMuxer::with_options(SegmentMuxerOptions { creation_timestamp })?;
+        let fmp4_muxer = Fmp4SegmentMuxer::with_options(SegmentMuxerOptions {
+            // 字幕トラックは未対応のため、トラックメタデータはデフォルト値を使う
+            creation_timestamp,
+            ..Default::default()
+        })?;
 
         // ファイナライズ時の標準 MP4 moov 生成用 muxer
         let mut mp4_muxer = Mp4FileMuxer::with_options(Mp4FileMuxerOptions {
             creation_timestamp,
             reserved_moov_box_size: 0,
+            // 字幕トラックは未対応のため、トラックメタデータはデフォルト値を使う
+            ..Default::default()
         })?;
 
         // ファイルを作成
@@ -155,7 +160,9 @@ impl HybridMp4Writer {
             file: BufWriter::new(file),
             fmp4_muxer,
             initial_recovery_muxer: Some(Fmp4SegmentMuxer::with_options(SegmentMuxerOptions {
+                // 字幕トラックは未対応のため、トラックメタデータはデフォルト値を使う
                 creation_timestamp,
+                ..Default::default()
             })?),
             mp4_muxer,
             mdat_start_offset,
@@ -887,21 +894,14 @@ impl HybridMp4Writer {
         };
 
         match rpc_message {
-            Mp4WriterRpcMessage::Pause { reply_tx } => {
-                let _ = reply_tx.send(self.core.pause_recording());
-            }
-            Mp4WriterRpcMessage::Resume { reply_tx } => {
-                let _ = reply_tx.send(self.core.resume_recording());
-            }
             Mp4WriterRpcMessage::Finish { reply_tx } => {
                 let _ = reply_tx.send(());
                 *rpc_rx_enabled = false;
                 self.core.input_video_track_id = None;
                 self.core.input_audio_track_id = None;
-                return Ok(true);
+                Ok(true)
             }
         }
-        Ok(false)
     }
 
     fn handle_audio_message(
@@ -1128,7 +1128,7 @@ mod tests {
         // ファイナライズ済みの標準 MP4 として音声トラックを読み戻し、サンプル数・コーデック・データに加えて、
         // 全フレームに sample_entry が載っていること（エンコード済みフレームは常に sample_entry を持つ不変条件）と、
         // 後続フレームの sample_entry が初回と等価（changed_since=false）であることを検証する。
-        let reader = crate::sora::recording_mp4_reader::Mp4AudioReader::new(&output_path)?;
+        let reader = crate::mp4::sync_reader::Mp4AudioReader::new(&output_path)?;
         let read_audio_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(read_audio_samples.len(), audio_frame_count);
         let mut first_audio_entry: Option<&SharedSampleEntry> = None;
@@ -1149,7 +1149,7 @@ mod tests {
         }
 
         // 映像トラックも読み戻し、全フレームに sample_entry が載っていること・初回と等価であることを確認する。
-        let reader = crate::sora::recording_mp4_reader::Mp4VideoReader::new(&output_path)?;
+        let reader = crate::mp4::sync_reader::Mp4VideoReader::new(&output_path)?;
         let read_video_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(read_video_samples.len(), 1);
         let mut first_video_entry: Option<&SharedSampleEntry> = None;
@@ -1232,7 +1232,7 @@ mod tests {
         drop(writer);
 
         // 全 5 音声フレームに sample_entry が載り、初回と等価であることを検証する。
-        let reader = crate::sora::recording_mp4_reader::Mp4AudioReader::new(&output_path)?;
+        let reader = crate::mp4::sync_reader::Mp4AudioReader::new(&output_path)?;
         let read_audio_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(
             read_audio_samples.len(),
@@ -1255,7 +1255,7 @@ mod tests {
         }
 
         // 全 3 映像フレームに sample_entry が載り、初回と等価であることを検証する。
-        let reader = crate::sora::recording_mp4_reader::Mp4VideoReader::new(&output_path)?;
+        let reader = crate::mp4::sync_reader::Mp4VideoReader::new(&output_path)?;
         let read_video_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(
             read_video_samples.len(),

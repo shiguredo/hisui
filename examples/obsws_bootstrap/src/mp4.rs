@@ -81,6 +81,8 @@ impl SimpleMp4Writer {
                 .elapsed()
                 .map_err(|e| format!("failed to get epoch: {e}"))?,
             reserved_moov_box_size: 0,
+            // 字幕トラックは未対応のため、トラックメタデータはデフォルト値を使う
+            ..Default::default()
         };
         let muxer =
             Mp4FileMuxer::with_options(muxer_options).map_err(|e| format!("muxer error: {e}"))?;

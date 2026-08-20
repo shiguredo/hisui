@@ -11,29 +11,16 @@
 
 ## develop
 
-- [CHANGE] `hisui tune` のパラメータ最適化エンジンを外部 `optuna` コマンドから自前の NSGA-II 実装に変更する
-  - Python + optuna の事前インストールが不要になる
-  - 試行履歴の保存形式を SQLite (`optuna.db`) から JSON Lines (`<name>.jsonl`) に変更する (既存の `optuna.db` は引き継げない)
-  - `--trial-count` の意味を「追加の試行回数」から「既存の履歴を含めた合計の到達回数」に変更する
-  - 多重起動防止のためにロックファイル (`<name>.lock`) を使用する (中断などで残った場合は次回起動時に自動回収する)
-  - @sile
-- [CHANGE] VMAF 評価を外部 `vmaf` コマンドから `shiguredo_vmaf` ライブラリ呼び出しに変更する
-  - 外部 `vmaf` バイナリの事前インストール (PATH 設定) が不要になる
-  - 代わりにビルド時に libvmaf の prebuilt バイナリのダウンロード (ネットワークアクセス) が発生する
-  - `hisui vmaf` の `--vmaf-output-file` オプションと、実行結果 JSON の `vmaf_output_file_path` フィールドを削除する
+- [CHANGE] `compose` / `vmaf` / `tune` サブコマンドと Sora 録画機能を削除する
+  - Sora 録画合成機能は sora-archive-compositor に移行したため
+  - 録画専用モジュール (src/sora / src/tune)、レイアウト機能、WebM ファイルの読み込みも削除する
+  - server RPC の既定エンコードパラメータは録画機能非依存の既定値を使用する
   - @sile
 - [CHANGE] ログ出力の時刻形式を UNIX タイムスタンプから ISO 8601 UTC 形式に変更する
   - ターミナル出力時は severity に応じて行全体を色付けする
   - `NO_COLOR` 環境変数が設定されている場合は色付けを無効にする
   - @sile
 - [CHANGE] FDK-AAC を `fdk-aac` feature フラグによるビルド時有効化と、`--fdk-aac` オプションによる実行時の共有ライブラリ指定を併用する方式に変更する
-  - @sile
-- [CHANGE] compose サブコマンドで `--stats-file` を指定した場合に出力される統計 JSON の内容を調整する
-  - トップレベルの `worker_threads` が削除される
-  - `processors` から `progress_bar` が削除される
-  - `processors` の各要素から `total_processing_seconds` が削除される
-  - `video_mixer` では `output_video_resolution` が削除され、`output_video_width` / `output_video_height` が追加される
-  - `webm_audio_reader` / `webm_video_reader` では `input_files` が削除され、`current_input_file` / `total_sample_count` が追加される
   - @sile
 - [CHANGE] orfail crate を依存から削除する
   - これにより、エラー発生時に標準エラー出力に表示されるメッセージの細部のフォーマットに非互換な変更が入ることになる
@@ -79,7 +66,7 @@
   - @sile
 - [ADD] hisui 共通フラグとして `--emit-exit-metrics` を追加し、サブコマンドの終了時に内部メトリクスを JSON Lines 形式で標準出力へ出力する
   - 環境変数 `HISUI_EMIT_EXIT_METRICS` でも有効化できる
-  - `list-codecs` / `tune` を指定した場合は内部メトリクスを持たないため、指定しても出力は空 (`{"type":"metrics","metrics":[]}`) になる
+  - `list-codecs` を指定した場合は内部メトリクスを持たないため、指定しても出力は空 (`{"type":"metrics","metrics":[]}`) になる
   - @sile
 - [ADD] server サブコマンドに `--emit-startup-info` フラグを追加する
   - bind 完了直後に実バインド情報 (`{"type":"startup_info", "server":{...}, "ui":..., "pid":...}` 形式) を JSON Lines で標準出力へ出力する
@@ -88,7 +75,7 @@
   - @sile
 - [ADD] inspect コマンドが fMP4 ファイルの読み込みに対応する
   - 拡張子ではなくファイル先頭を読んで通常 MP4 / fragmented MP4 を判定する
-  - inspect は fMP4 を `format: "fmp4"` として返す（通常 MP4 は `"mp4"`、WebM は `"webm"`）
+  - inspect は fMP4 を `format: "fmp4"` として返す（通常 MP4 は `"mp4"`）
   - @sile
 - [ADD] obsws の Output に MPEG-DASH ライブ出力 (`outputName: "mpeg_dash"`) を追加する
   - 指定されたビデオ/オーディオコーデックの fragmented MP4 セグメントを生成し、MPD マニフェストで管理する
@@ -116,13 +103,13 @@
   - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
-- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.14 を追加する
+- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.16 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
 - [ADD] 依存ライブラリに tokio 1.53.1 を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_audio_device 2026.2.0 を追加する
+- [ADD] 依存ライブラリに shiguredo_audio_device 2026.3.0 を追加する
   - @sile
 - [ADD] server サブコマンドに `--ui-remote-url` オプションを追加する
   - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする
@@ -182,7 +169,7 @@
   - `shiguredo_video_toolbox::supported_codecs()` を使った実行時のハードウェア対応検出を行う
   - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
   - @sile
-- [UPDATE] shiguredo_dav1d のバージョンを 2026.2.0-canary.0 にあげる
+- [UPDATE] shiguredo_dav1d のバージョンを 2026.2.0-canary.2 にあげる
   - このバージョンから shiguredo_dav1d crate のリポジトリが <https://github.com/shiguredo/dav1d-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.1 にあげる
@@ -233,10 +220,10 @@
 - [UPDATE] shiguredo_nvcodec のバージョンを 2026.2.0 にあげる
   - このバージョンから shiguredo_nvcodec crate のリポジトリが <https://github.com/shiguredo/nvcodec-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_libvpx のバージョンを 2026.2.0-canary.0 にあげる
+- [UPDATE] shiguredo_libvpx のバージョンを 2026.2.0-canary.1 にあげる
   - このバージョンから shiguredo_libvpx crate のリポジトリが <https://github.com/shiguredo/libvpx-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_libyuv のバージョンを 2026.2.0-canary.1 にあげる
+- [UPDATE] shiguredo_libyuv のバージョンを 2026.2.0-canary.2 にあげる
   - このバージョンから shiguredo_libyuv crate のリポジトリが <https://github.com/shiguredo/libyuv-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.1 にあげる
@@ -245,11 +232,11 @@
 - [UPDATE] shiguredo_audio_toolbox のバージョンを 2026.2.0-canary.0 にあげる
   - このバージョンから shiguredo_audio_toolbox crate のリポジトリが <https://github.com/shiguredo/audio-toolbox-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_mp4 のバージョンを 2026.3.0 にあげる
+- [UPDATE] shiguredo_mp4 のバージョンを 2026.4.0 にあげる
   - @sile
-- [UPDATE] shiguredo_s3 のバージョンを 2026.1.0-canary.5 にあげる
+- [UPDATE] shiguredo_s3 のバージョンを 2026.1.0-canary.6 にあげる
   - @sile
-- [UPDATE] shiguredo_video_device のバージョンを 2026.2.0 にあげる
+- [UPDATE] shiguredo_video_device のバージョンを 2026.3.0 にあげる
   - @sile
 - [UPDATE] raw_player のバージョンを 2026.2.0-canary.1 にあげる
   - @sile
@@ -265,6 +252,19 @@
 - [FIX] inspect 等で processor が異常終了した際に、購読側が EOS を受け取れずプロセスがハングする問題を修正する
   - publish していたトラックが EOS 未送信のまま終了した場合に、購読側へ EOS を伝えて停止できるようにする
   - inspect は processor が異常終了した場合に非ゼロ終了コードで終了するようにする
+  - @sile
+- [FIX] VideoToolbox デコーダーで、単一 stsd の MP4 内でビットストリーム内パラメータセット (SPS / PPS / VPS) が変化する入力 (ffmpeg concat 出力等) の解像度変更を追従できない問題を修正する
+  - フレームデータ (AVCC 形式) 内の SPS / PPS / VPS を検出して再初期化判定に使うようにする
+  - フレーム内に該当 NALU が無い場合は従来どおり sample_entry にフォールバックする
+  - @sile
+- [FIX] nvcodec デコーダーで、多エントリ stsd の MP4 内で sample_entry (VPS / SPS / PPS) が変化する入力 (H.264 / H.265) の解像度変更を追従できない問題を修正する
+  - parameter_sets を初回のみキャッシュしていたため、sample_entry 変化後の keyframe に古い parameter_sets を prepend し続けてデコード結果が壊れていた
+  - sample_entry 由来の parameter_sets を毎フレーム抽出してキャッシュを更新するようにする
+  - H.264 / H.265 の多エントリ stsd テストデータ (回帰テスト) を追加する
+  - @sile
+- [FIX] nvcodec デコーダーで、SEI / AUD が先頭に現れる keyframe のパラメータセット (SPS / PPS、H.265 では VPS / SPS / PPS) を検出できず二重 prepend される問題を修正する
+  - 先頭 1 NALU しか見ずに SPS / PPS / VPS の有無を判定していたため、`[SEI][SPS][PPS][IDR]` 等の入力で検出に失敗してキャッシュ済みパラメータセットを二重 prepend していた
+  - length prefix ベースで全 NALU を走査する共通ロジックを利用し、完全な組が揃ったときだけ prepend を抑止するようにする
   - @sile
 
 ### misc
@@ -307,6 +307,21 @@
 - [UPDATE] nojson のバージョンを 0.3.12 にあげる
   - @sile
 - [UPDATE] shiguredo_video_device のバージョンを 2026.1.0 にあげる
+  - @sile
+
+## 2025.3.3
+
+**リリース日**: 2026-08-07
+
+- [UPDATE] shiguredo_nvcodec を 2025.2.1 から 2026.2.0 に更新する
+  - コールバックベース API への追従で NvcodecDecoder / NvcodecEncoder の実装を書き換える
+  - @sile
+- [FIX] デコードで nvcodec を使用した場合に、解像度が途中で変化する H.264 / H.265 の録画ファイルを適切に扱えない問題を修正する
+  - 解像度の変化に追従できず、合成結果が不正なものとなっていたのを修正した
+  - @sile
+- [FIX] MP4 録画ファイルで hvc1 ボックスのサポートを追加する
+  - MP4 で、H.265 ストリームを表現するためには、hev1 ないし hvc1 ボックスが使われるが、2025.3.2 までの hisui は hev1 ボックスのみをサポートしていた
+  - しかし Sora 2026.1.0 以降の録画では hvc1 ボックスがデフォルトで使用されるために、hev1 / hvc1 の両方を扱えるように修正する
   - @sile
 
 ## 2025.3.2
@@ -396,7 +411,6 @@
 - [CHANGE] legacy サブコマンドを削除する
   - Hisui 2025.1.x で提供されていた `hisui legacy` サブコマンドを削除
   - 代わりに `hisui compose` サブコマンドを使用すること
-  - 詳細は [マイグレーションガイド](./docs/migrate_hisui_legacy.md) を参照
   - @sile
 - [CHANGE] ビルド用 CUDA Toolkit のバージョンを 13.0.2 にする
   - @voluntas

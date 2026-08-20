@@ -3,7 +3,7 @@
 この文書は、 Hisui の統計値基盤を新規開発者向けに説明するためのものです。
 
 Hisui の統計値は、単なる補助情報ではありません。
-processor ごとの実行状況、エラー状態、 runtime 状態を共通の仕組みで収集し、 `/metrics` や compose stats JSON などの複数の公開経路に流すための内部基盤です。
+processor ごとの実行状況、エラー状態、 runtime 状態を共通の仕組みで収集し、 `/metrics` などの複数の公開経路に流すための内部基盤です。
 
 ## この文書の対象範囲
 
@@ -14,7 +14,6 @@ processor ごとの実行状況、エラー状態、 runtime 状態を共通の�
 
 以下は補助的に扱います。
 
-- compose の `--stats-file`
 - `obsws` の `GetStats`
 - bootstrap WebRTC stats
 
@@ -33,20 +32,18 @@ flowchart TD
     stats["Stats"]
     entries["StatsEntry"]
     metrics["/metrics"]
-    compose["compose stats JSON"]
     obsws["obsws runtime stats"]
     webrtc["bootstrap WebRTC stats"]
 
     modules --> stats
     stats --> entries
     entries --> metrics
-    entries --> compose
     obsws --> metrics
     webrtc --> webrtc
 ```
 
 重要なのは、 Hisui の統計値が 1 種類の出力だけを前提にしていない点です。
-共通基盤としては `Stats` があり、その上に Prometheus text、 Prometheus JSON、 compose 用 JSON などの整形層が載ります。
+共通基盤としては `Stats` があり、その上に Prometheus text、 Prometheus JSON などの整形層が載ります。
 
 ## 基本概念
 
@@ -77,7 +74,7 @@ flowchart TD
 ### `StatsLabels`
 
 `StatsLabels` は label の集合です。
-Prometheus 公開だけでなく、 compose stats JSON の processor 単位グルーピングにも使われます。
+`Stats::entries()` で取得した `StatsEntry` の識別に使われます。
 
 Hisui では特に以下の label が重要です。
 
@@ -214,20 +211,6 @@ HTTP endpoint 側で現在 runtime から取得し、その場で追加してい
 
 ## 補助的な公開経路
 
-### compose stats JSON
-
-compose の `--stats-file` は、 `Stats::entries()` をそのまま外へ出すのではありません。
-`sora/recording_compose_stats_json.rs` で processor 単位に再整形します。
-
-この整形には以下の特徴があります。
-
-- `processor_id` ごとにまとめる
-- `processor_type` を `type` として出す
-- `error` は特別扱いする
-- `processor_id` / `processor_type` 以外の追加 label を持つ metric は除外する
-
-つまり compose stats JSON は、 Prometheus 用の汎用表現ではなく、 compose 向けの互換 JSON です。
-
 ### `obsws` の `GetStats`
 
 `obsws` の `GetStats` は `Stats` 基盤を一部参照しますが、レスポンス全体は `input_registry` の runtime state や output 状態を組み合わせた別集計です。
@@ -260,10 +243,7 @@ WebRTC native stats を収集して JSON 化して返します。
 label は便利ですが、以下の影響があります。
 
 - Prometheus 上の系列数が増える
-- compose stats JSON では追加 label 付き metric が落とされる
 - テスト側で参照条件が複雑になる
-
-特に compose stats JSON に出したい値なら、 `processor_id` / `processor_type` 以外の label を付けない方が扱いやすいです。
 
 ### 3. 文字列 metric は特殊である
 
@@ -274,7 +254,6 @@ label は便利ですが、以下の影響があります。
 
 - 集計対象の数値には向かない
 - 現在の状態やフォーマット名の露出には向く
-- compose stats JSON では文字列として自然に出せる
 
 ## どこから読むか
 
@@ -286,8 +265,6 @@ label は便利ですが、以下の影響があります。
    - Prometheus 公開の形を見る
 3. `src/media_pipeline.rs`
    - `Stats` が processor へどう伝播するかを見る
-4. `src/sora/recording_compose_stats_json.rs`
-   - 用途別整形の制約を見る
 
 ## 関連ドキュメント
 

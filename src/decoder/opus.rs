@@ -2,7 +2,7 @@ use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
 
 // 以下の理由で Opus デコーダーは常にステレオ扱いにする:
 // - 実際の入力に関わらず常にステレオを指定しても問題ない
-// - mp4 / webm コンテナに格納されるチャネル数の情報は信用できない
+// - mp4 コンテナに格納されるチャネル数の情報は信用できない
 // - 無音補完が入るとモノラル・ステレオのパケットが混在することがある
 const DECODED_CHANNELS: u8 = 2;
 

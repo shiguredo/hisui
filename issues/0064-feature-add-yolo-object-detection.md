@@ -66,7 +66,7 @@ PoC の `hisui ml` (カメラ入力 → YOLO → ウィンドウ表示、`player
 
 - カメラ入力 → ウィンドウ表示の PoC 形を磨く (ライブデモ用途)
 - 動画ファイル入力に置き換え (`hisui -x detect <video.mp4>` 等、CI 親和性高い)
-- compose / server 系へのオーバーレイ統合 (検出枠を合成映像に焼き込む)
+- server (obsws) 系へのオーバーレイ統合 (検出枠を合成映像に焼き込む)
 - MediaFrame に Detection バリアントを追加し、processor 経由で結果を流す (0060 の MediaFrame::Text と同様のパターン)
 
 ### モデル配布
