@@ -1,7 +1,7 @@
 # OpenH264 エンコーダーがバッファリング時にタイムスタンプを失い、末尾フレームが欠落する
 
 - Created: 2026-08-20
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-20
 - Branch: feature/fix-openh264-encoder-timestamp-loss
 - Polished: {YYYY-MM-DD}
 
@@ -34,3 +34,11 @@
 - 内部バッファに残ったフレームを EOS / `finish()` 後に出せる。crate に Encoder flush が無ければ、その制約を issue か `CHANGES.md` に明記し、メタデータ対応は完了とする
 - 既存の `sample_entry` テストが通る
 - OpenH264 エンコーダーのテストで、フレーム数とタイムスタンプ列が検証されている（`OPENH264_PATH` 未設定の環境ではスキップする）
+
+## 解決方法
+
+- `shiguredo_openh264` の `Encoder::encode` が `None` を返すのは `videoFrameTypeSkip`（レート制御によるスキップ）であり、内部バッファからの遅延排出ではない
+- `Encoder` に `finish` / flush は無く、`finish` は `Decoder` のみにある
+- 現行の `Openh264Encoder::encode` は `None` なら何も残さず、`Some` ならその入力の timestamp を付ける。Skip の意味ではこれが正しい
+- 全入力を `input_queue` に積むと、スキップした入力の timestamp が次の実出力に付き、誤対応を新たに作る
+- コード変更は行わない
