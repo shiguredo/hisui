@@ -226,7 +226,9 @@ fn parse_i16be_samples(frame: &AudioFrame) -> crate::Result<Vec<i16>> {
 
     Ok(frame
         .data
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|chunk| i16::from_be_bytes([chunk[0], chunk[1]]))
         .collect())
 }
@@ -242,7 +244,9 @@ mod tests {
     }
 
     fn from_i16be(data: &[u8]) -> Vec<i16> {
-        data.chunks_exact(2)
+        data.as_chunks::<2>()
+            .0
+            .iter()
             .map(|chunk| i16::from_be_bytes([chunk[0], chunk[1]]))
             .collect()
     }
@@ -359,7 +363,7 @@ mod tests {
         let output = converter.convert(&input).expect("infallible");
         let interleaved = from_i16be(&output.data);
 
-        for pair in interleaved.chunks_exact(2) {
+        for pair in interleaved.as_chunks::<2>().0 {
             assert_eq!(pair[0], 0);
             assert_eq!(pair[1], 1000);
         }

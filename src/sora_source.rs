@@ -494,7 +494,7 @@ async fn audio_forward_task(
         // PCM i16 LE → I16Be 変換
         // libwebrtc の AudioTrackSinkHandler は i16 LE で提供する
         let mut i16be_data = Vec::with_capacity(frame.data.len());
-        for chunk in frame.data.chunks_exact(2) {
+        for chunk in frame.data.as_chunks::<2>().0 {
             let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
             i16be_data.extend_from_slice(&sample.to_be_bytes());
         }

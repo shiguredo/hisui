@@ -33,7 +33,9 @@ impl SharedAudioState {
         // I16Be → i16 ネイティブエンディアン（リトルエンディアン）に変換する
         let samples: Vec<i16> = frame
             .data
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| i16::from_be_bytes([c[0], c[1]]))
             .collect();
 

@@ -386,7 +386,7 @@ const _: () = assert!(
     "text overlay rendering assumes little-endian (raden Prgb32 layout)",
 );
 pub fn unpremultiply_argb(data: &mut [u8]) {
-    for chunk in data.chunks_exact_mut(4) {
+    for chunk in data.as_chunks_mut::<4>().0 {
         let a = chunk[3];
         if a == 0 {
             continue;

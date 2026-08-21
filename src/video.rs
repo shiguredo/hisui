@@ -342,7 +342,7 @@ impl VideoFrame {
                     y_plane_16.len()
                 )));
             }
-            for chunk in y_plane_16[..y_size * 2].chunks_exact(2) {
+            for chunk in y_plane_16[..y_size * 2].as_chunks::<2>().0 {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                 let value_8 = convert_10bit_to_8bit(value_16);
                 data.push(value_8);
@@ -360,7 +360,7 @@ impl VideoFrame {
                     )));
                 }
                 let row_data = &y_plane_16[row_start..row_start + width * 2];
-                for chunk in row_data.chunks_exact(2) {
+                for chunk in row_data.as_chunks::<2>().0 {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                     let value_8 = convert_10bit_to_8bit(value_16);
                     data.push(value_8);
@@ -377,7 +377,7 @@ impl VideoFrame {
                     u_plane_16.len()
                 )));
             }
-            for chunk in u_plane_16[..uv_size * 2].chunks_exact(2) {
+            for chunk in u_plane_16[..uv_size * 2].as_chunks::<2>().0 {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                 let value_8 = convert_10bit_to_8bit(value_16);
                 data.push(value_8);
@@ -394,7 +394,7 @@ impl VideoFrame {
                     )));
                 }
                 let row_data = &u_plane_16[row_start..row_start + uv_width * 2];
-                for chunk in row_data.chunks_exact(2) {
+                for chunk in row_data.as_chunks::<2>().0 {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                     let value_8 = convert_10bit_to_8bit(value_16);
                     data.push(value_8);
@@ -411,7 +411,7 @@ impl VideoFrame {
                     v_plane_16.len()
                 )));
             }
-            for chunk in v_plane_16[..uv_size * 2].chunks_exact(2) {
+            for chunk in v_plane_16[..uv_size * 2].as_chunks::<2>().0 {
                 let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                 let value_8 = convert_10bit_to_8bit(value_16);
                 data.push(value_8);
@@ -428,7 +428,7 @@ impl VideoFrame {
                     )));
                 }
                 let row_data = &v_plane_16[row_start..row_start + uv_width * 2];
-                for chunk in row_data.chunks_exact(2) {
+                for chunk in row_data.as_chunks::<2>().0 {
                     let value_16 = u16::from_le_bytes([chunk[0], chunk[1]]);
                     let value_8 = convert_10bit_to_8bit(value_16);
                     data.push(value_8);

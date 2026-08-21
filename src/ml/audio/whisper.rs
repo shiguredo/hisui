@@ -170,7 +170,9 @@ fn load_mel_filters(num_mel_bins: usize) -> crate::Result<Vec<f32>> {
         )));
     }
     Ok(mel_bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect())
 }

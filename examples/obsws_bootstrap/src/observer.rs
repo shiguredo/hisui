@@ -156,7 +156,9 @@ impl AudioTrackSinkHandler for AudioRecordHandler {
         }
         // u8 スライスをネイティブエンディアン i16 に変換する
         let pcm: Vec<i16> = audio_data
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|chunk| i16::from_ne_bytes([chunk[0], chunk[1]]))
             .collect();
         let _ = self.audio_tx.try_send(AudioFrameData {

@@ -940,7 +940,9 @@ fn audio_frame_to_i16_samples(frame: &AudioFrame) -> crate::Result<Vec<i16>> {
     }
     Ok(frame
         .data
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| i16::from_be_bytes([c[0], c[1]]))
         .collect())
 }

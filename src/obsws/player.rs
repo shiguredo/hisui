@@ -157,7 +157,7 @@ fn send_media(
 /// ビッグエンディアン I16 PCM をリトルエンディアン I16 PCM に変換する
 fn i16be_to_i16le(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len());
-    for chunk in data.chunks_exact(2) {
+    for chunk in data.as_chunks::<2>().0 {
         out.push(chunk[1]);
         out.push(chunk[0]);
     }

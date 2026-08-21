@@ -86,7 +86,9 @@ fn load_pcm16le_mono_f32(path: &str) -> hisui::Result<Vec<f32>> {
         )));
     }
     Ok(bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
         .collect())
 }
@@ -104,7 +106,9 @@ fn load_pcm16le_mono_audio_frames(
     }
 
     let samples: Vec<i16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
         .collect();
     let sample_rate = SampleRate::from_u32(16_000).expect("16 kHz は有効");

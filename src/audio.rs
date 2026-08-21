@@ -114,7 +114,7 @@ impl AudioFrame {
             return Err(crate::Error::new("expected stereo audio data"));
         }
 
-        let samples = self.data.chunks_exact(4).map(|c| {
+        let samples = self.data.as_chunks::<4>().0.iter().map(|c| {
             (
                 i16::from_be_bytes([c[0], c[1]]),
                 i16::from_be_bytes([c[2], c[3]]),
@@ -134,7 +134,7 @@ impl AudioFrame {
             return Err(crate::Error::new("expected stereo audio data"));
         }
 
-        let samples = self.data.chunks_exact(4).flat_map(|c| {
+        let samples = self.data.as_chunks::<4>().0.iter().flat_map(|c| {
             [
                 i16::from_be_bytes([c[0], c[1]]),
                 i16::from_be_bytes([c[2], c[3]]),
@@ -166,7 +166,9 @@ impl AudioFrame {
         }
         Ok(self
             .data
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| i16::from_be_bytes([c[0], c[1]])))
     }
 }
