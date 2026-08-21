@@ -316,6 +316,9 @@ fn default_nvcodec_decoder_config(
         max_num_decode_surfaces: 20,
         max_display_delay: 0,
         surface_format: shiguredo_nvcodec::SurfaceFormat::Nv12,
+        // 解像度変化時の decoder 再作成コストを避けるため、セッション上限内の変化は
+        // cuvidReconfigureDecoder で処理する
+        reconfigure_enabled: true,
     }
 }
 

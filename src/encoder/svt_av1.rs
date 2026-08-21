@@ -75,7 +75,7 @@ impl SvtAv1Encoder {
     }
 
     fn handle_encoded_frames(&mut self) -> crate::Result<()> {
-        while let Some(frame) = self.inner.next_frame() {
+        while let Some(frame) = self.inner.next_frame()? {
             // B フレームはない前提なので、タイムスタンプのいれかわりもない
             let input_frame = self
                 .input_queue

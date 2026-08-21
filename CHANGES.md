@@ -175,11 +175,12 @@
 - [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.1 にあげる
   - このバージョンから shiguredo_fdk_aac crate のリポジトリが <https://github.com/shiguredo/fdk-aac-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_opus のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_opus のバージョンを 2026.2.0 にあげる
   - このバージョンから shiguredo_opus crate のリポジトリが <https://github.com/shiguredo/opus-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_svt_av1 のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_svt_av1 のバージョンを 2026.2.0 にあげる
   - このバージョンから shiguredo_svt_av1 crate のリポジトリが <https://github.com/shiguredo/svt-av1-rs> に独立したので、hisui のワークスペースからは削除されている
+  - 2026.2.0 から `next_frame()` がエンコードエラーを `Result` で返すようになったため、エラーを握りつぶさず伝播するようにする
   - @sile
 - [UPDATE] shiguredo_http11 のバージョンを 2026.6.1 にあげる
   - @voluntas
@@ -206,7 +207,7 @@
   - @sile
 - [UPDATE] rustls crate のバージョンを 0.23.42 に上げる
   - @sile
-- [UPDATE] aws-lc-rs crate のバージョンを 1.17.3 に上げる
+- [UPDATE] aws-lc-rs crate のバージョンを 1.18.0 に上げる
   - @sile
 - [UPDATE] MP4 ファイルの読み書きに Mp4FileDemuxer および Mp4FileMuxer を使用する
   - 今までは shiguredo_mp4 の低レベル API を使っていたが、高レベル API に切り替える
@@ -217,8 +218,9 @@
 - [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0 にあげる
   - shiguredo_openh264 crate のリポジトリは 2026.1.0 から <https://github.com/shiguredo/openh264-rs> に独立しており、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_nvcodec のバージョンを 2026.2.0 にあげる
+- [UPDATE] shiguredo_nvcodec のバージョンを 2026.3.0-canary.0 にあげる
   - このバージョンから shiguredo_nvcodec crate のリポジトリが <https://github.com/shiguredo/nvcodec-rs> に独立したので、hisui のワークスペースからは削除されている
+  - nvcodec デコーダーの `reconfigure_enabled` を有効にして、解像度変化時に decoder を再作成せず `cuvidReconfigureDecoder` で処理する
   - @sile
 - [UPDATE] shiguredo_libvpx のバージョンを 2026.2.0-canary.1 にあげる
   - このバージョンから shiguredo_libvpx crate のリポジトリが <https://github.com/shiguredo/libvpx-rs> に独立したので、hisui のワークスペースからは削除されている
@@ -304,7 +306,9 @@
   - @sile
 - [UPDATE] tracing-subscriber のバージョンを 0.3.23 にあげる
   - @sile
-- [UPDATE] nojson のバージョンを 0.3.12 にあげる
+- [UPDATE] nojson のバージョンを 0.3.14 にあげる
+  - @sile
+- [UPDATE] mpeg2ts のバージョンを 0.6.1 にあげる
   - @sile
 - [UPDATE] shiguredo_video_device のバージョンを 2026.1.0 にあげる
   - @sile
