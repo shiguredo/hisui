@@ -38,7 +38,7 @@
   - hev1 と hvc1 は仕様や機能的にはほぼ同様なので、単に「より多くのプレイヤーが対応している方」を選択すればいい
     - もし今後 hev1 のみに対応している主要なプレイヤーが見つかった場合には、オプションでどちらのボックスを使用するかを指定可能にすることを検討する
   - @sile
-- [ADD] オプション依存として candle 系ライブラリ (candle-core 0.11.0 / candle-nn 0.11.0 / candle-transformers 0.11.0 / candle-onnx 0.11.0 / tokenizers 0.23.1) を追加する
+- [ADD] オプション依存として candle 系ライブラリ (candle-core 0.11.0 / candle-nn 0.11.0 / candle-transformers 0.11.0 / candle-onnx 0.11.0 / tokenizers 0.23.2) を追加する
   - `candle` / `candle-cuda` / `candle-metal` feature 配下で有効化する
   - candle-onnx のビルドに `protoc` (Ubuntu の `protobuf-compiler` 等) が必要になる
   - 本リリースのバイナリ配布物には含めない (将来の利用者向けサブコマンドが揃うタイミングで再検討する)
@@ -103,7 +103,7 @@
   - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
-- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.16 を追加する
+- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.21 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
@@ -169,10 +169,10 @@
   - `shiguredo_video_toolbox::supported_codecs()` を使った実行時のハードウェア対応検出を行う
   - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
   - @sile
-- [UPDATE] shiguredo_dav1d のバージョンを 2026.2.0-canary.2 にあげる
+- [UPDATE] shiguredo_dav1d のバージョンを 2026.2.0 にあげる
   - このバージョンから shiguredo_dav1d crate のリポジトリが <https://github.com/shiguredo/dav1d-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.1 にあげる
+- [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0 にあげる
   - このバージョンから shiguredo_fdk_aac crate のリポジトリが <https://github.com/shiguredo/fdk-aac-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_opus のバージョンを 2026.2.0 にあげる
@@ -207,7 +207,7 @@
   - @sile
 - [UPDATE] rustls crate のバージョンを 0.23.42 に上げる
   - @sile
-- [UPDATE] aws-lc-rs crate のバージョンを 1.18.0 に上げる
+- [UPDATE] aws-lc-rs crate のバージョンを 1.18.1 に上げる
   - @sile
 - [UPDATE] MP4 ファイルの読み書きに Mp4FileDemuxer および Mp4FileMuxer を使用する
   - 今までは shiguredo_mp4 の低レベル API を使っていたが、高レベル API に切り替える
@@ -215,7 +215,7 @@
 - [UPDATE] hvc1 ボックスを含む入力 MP4 ファイルに対応する
   - 今までは H.265 では hev1 ボックスが使われている前提だったが、hvc1 ボックスにも対応する
   - @sile
-- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_openh264 のバージョンを 2026.2.0 にあげる
   - shiguredo_openh264 crate のリポジトリは 2026.1.0 から <https://github.com/shiguredo/openh264-rs> に独立しており、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_nvcodec のバージョンを 2026.3.0-canary.0 にあげる
@@ -225,7 +225,7 @@
 - [UPDATE] shiguredo_libvpx のバージョンを 2026.2.0-canary.1 にあげる
   - このバージョンから shiguredo_libvpx crate のリポジトリが <https://github.com/shiguredo/libvpx-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_libyuv のバージョンを 2026.2.0-canary.2 にあげる
+- [UPDATE] shiguredo_libyuv のバージョンを 2026.2.0-canary.5 にあげる
   - このバージョンから shiguredo_libyuv crate のリポジトリが <https://github.com/shiguredo/libyuv-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.1 にあげる
@@ -236,7 +236,9 @@
   - @sile
 - [UPDATE] shiguredo_mp4 のバージョンを 2026.4.0 にあげる
   - @sile
-- [UPDATE] shiguredo_s3 のバージョンを 2026.1.0-canary.6 にあげる
+- [UPDATE] shiguredo_s3 のバージョンを 2026.1.0-canary.7 にあげる
+  - @sile
+- [UPDATE] shiguredo_rtsp のバージョンを 2026.1.0-canary.2 にあげる
   - @sile
 - [UPDATE] shiguredo_video_device のバージョンを 2026.3.0 にあげる
   - @sile
@@ -310,7 +312,7 @@
   - @sile
 - [UPDATE] tracing-subscriber のバージョンを 0.3.23 にあげる
   - @sile
-- [UPDATE] nojson のバージョンを 0.3.14 にあげる
+- [UPDATE] nojson のバージョンを 0.3.15 にあげる
   - @sile
 - [UPDATE] mpeg2ts のバージョンを 0.6.1 にあげる
   - @sile
