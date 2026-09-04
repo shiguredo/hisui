@@ -1,7 +1,7 @@
 # inspect --decode のデコード結果対応付けが timestamp 非依存で欠落を誤読しうる
 
 - Created: 2026-09-04
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-04
 - Branch: feature/fix-inspect-decode-sample-correspondence
 - Polished: 2026-09-04
 
@@ -85,3 +85,14 @@ closed の 0092 は、解像度変更後の後半サンプルで `decoded_data_s
 - VideoToolbox 経路の入力フレーム数と出力フレーム数
 - ffmpeg がその MP4 から出したデコードフレーム数
 - MP4 の実際の sample duration と、hisui が算出した `duration_us` の両方
+
+## 解決方法
+
+`src/subcommand_inspect.rs` の `OutputPrinter` で、映像デコード結果の対応付けを FIFO から timestamp ベースに変更した。
+
+- `DecodedVideoInfo` に timestamp を持たせ、`apply_decoded_video_infos_by_timestamp` で同じ timestamp のエンコード済み映像サンプルへ `decoded_data_size` / `width` / `height` を載せる
+- デコード出力が無い timestamp のサンプルは未設定のまま残し、後続へ繰り下げない
+- 同一 timestamp のサンプルが複数ある場合は未設定のものから順に載せ、既設定は上書きしない
+- 音声は AAC の `SampleBasedTimestampAligner` により出力 timestamp がエンコード済みサンプルと一致しないことがあるため、従来どおり FIFO のままとした
+- `OutputPrinter` の単体テストで timestamp 対応・欠落時の非シフト・同一 timestamp・再適用非上書きを検証した
+- `CHANGES.md` に FIX エントリを追加した
