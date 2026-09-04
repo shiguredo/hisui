@@ -403,6 +403,9 @@ pub struct OutputPrinter {
     video_codec: Option<CodecName>,
     audio_samples: Vec<AudioSampleInfo>,
     video_samples: Vec<VideoSampleInfo>,
+    // 音声は FIFO のままとする。AAC は SampleBasedTimestampAligner で出力 timestamp を
+    // sample 数から推定するため、エンコード済みサンプルの timestamp と一致しないことがある。
+    // 映像だけ timestamp 対応付けにする。
     pending_audio_decoded_data_sizes: VecDeque<usize>,
     pending_video_decoded_infos: VecDeque<DecodedVideoInfo>,
     active_streams: HashSet<crate::TrackId>,
