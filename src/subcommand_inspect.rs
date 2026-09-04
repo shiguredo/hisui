@@ -414,9 +414,36 @@ pub struct OutputPrinter {
 
 #[derive(Debug)]
 struct DecodedVideoInfo {
+    /// デコード出力側の timestamp (エンコード済みサンプルとの対応付けに使う)
+    timestamp: Duration,
     decoded_data_size: usize,
     width: Option<usize>,
     height: Option<usize>,
+}
+
+/// デコード出力を同じ timestamp のエンコード済み映像サンプルへ載せる
+///
+/// 対応するエンコード済みサンプルがまだ無いデコード出力は `pending` に残す。
+/// 見つからない timestamp のサンプルへは繰り下げない (FIFO ではない)。
+fn apply_decoded_video_infos_by_timestamp(
+    video_samples: &mut [VideoSampleInfo],
+    pending: &mut VecDeque<DecodedVideoInfo>,
+) {
+    let mut remaining = VecDeque::new();
+    while let Some(decoded_info) = pending.pop_front() {
+        if let Some(info) = video_samples
+            .iter_mut()
+            .find(|s| s.timestamp == decoded_info.timestamp)
+        {
+            info.decoded_data_size = Some(decoded_info.decoded_data_size);
+            info.width = decoded_info.width;
+            info.height = decoded_info.height;
+        } else {
+            // エンコード済みサンプルがまだ来ていないので後で再試行する
+            remaining.push_back(decoded_info);
+        }
+    }
+    *pending = remaining;
 }
 
 impl OutputPrinter {
@@ -582,6 +609,7 @@ impl OutputPrinter {
                 let video_frame = media_sample.expect_video()?;
                 self.pending_video_decoded_infos
                     .push_back(DecodedVideoInfo {
+                        timestamp: video_frame.timestamp,
                         decoded_data_size: video_frame.data.len(),
                         width: video_frame.size().map(|size| size.width),
                         height: video_frame.size().map(|size| size.height),
@@ -612,20 +640,10 @@ impl OutputPrinter {
     }
 
     fn try_apply_pending_video_decoded_infos(&mut self) {
-        while let Some(decoded_info) = self.pending_video_decoded_infos.pop_front() {
-            let Some(info) = self
-                .video_samples
-                .iter_mut()
-                .find(|s| s.decoded_data_size.is_none())
-            else {
-                self.pending_video_decoded_infos.push_front(decoded_info);
-                break;
-            };
-
-            info.decoded_data_size = Some(decoded_info.decoded_data_size);
-            info.width = decoded_info.width;
-            info.height = decoded_info.height;
-        }
+        apply_decoded_video_infos_by_timestamp(
+            &mut self.video_samples,
+            &mut self.pending_video_decoded_infos,
+        );
     }
 }
 
@@ -869,5 +887,133 @@ mod tests {
             .expect("一時ファイルに書き込めること");
         let result = detect_container_format(file.path());
         assert!(result.is_err(), "破損 MP4 は判定エラーが伝播すること");
+    }
+
+    /// テスト用のエンコード済み映像サンプルを作る
+    fn video_sample(timestamp_us: u64, data_size: usize) -> VideoSampleInfo {
+        VideoSampleInfo {
+            timestamp: Duration::from_micros(timestamp_us),
+            duration: None,
+            data_size,
+            keyframe: false,
+            codec_specific_info: None,
+            decoded_data_size: None,
+            width: None,
+            height: None,
+        }
+    }
+
+    /// テスト用のデコード出力情報を作る
+    fn decoded_video(
+        timestamp_us: u64,
+        decoded_data_size: usize,
+        width: usize,
+        height: usize,
+    ) -> DecodedVideoInfo {
+        DecodedVideoInfo {
+            timestamp: Duration::from_micros(timestamp_us),
+            decoded_data_size,
+            width: Some(width),
+            height: Some(height),
+        }
+    }
+
+    #[test]
+    fn apply_decoded_video_infos_matches_by_timestamp() {
+        // エンコード列とデコード列を timestamp で対応付けること
+        let mut samples = vec![
+            video_sample(0, 100),
+            video_sample(40_000, 110),
+            video_sample(80_000, 120),
+        ];
+        let mut pending = VecDeque::from([
+            decoded_video(0, 1000, 320, 240),
+            decoded_video(40_000, 2000, 320, 240),
+            decoded_video(80_000, 3000, 640, 480),
+        ]);
+
+        apply_decoded_video_infos_by_timestamp(&mut samples, &mut pending);
+
+        assert!(
+            pending.is_empty(),
+            "全て対応付けられて pending が空になること"
+        );
+        assert_eq!(samples[0].decoded_data_size, Some(1000));
+        assert_eq!(samples[0].width, Some(320));
+        assert_eq!(samples[0].height, Some(240));
+        assert_eq!(samples[1].decoded_data_size, Some(2000));
+        assert_eq!(samples[2].decoded_data_size, Some(3000));
+        assert_eq!(samples[2].width, Some(640));
+        assert_eq!(samples[2].height, Some(480));
+    }
+
+    #[test]
+    fn apply_decoded_video_infos_does_not_shift_on_missing_decode() {
+        // 途中 1 件のデコード出力が欠けても、欠けていない timestamp へ誤って載せないこと
+        // FIFO なら先頭未設定へ繰り下げて S1 に 3000 が乗るが、timestamp 対応では乗らない
+        let mut samples = vec![
+            video_sample(0, 100),
+            video_sample(40_000, 110),
+            video_sample(80_000, 120),
+        ];
+        let mut pending = VecDeque::from([
+            decoded_video(0, 1000, 320, 240),
+            // timestamp 40_000 の出力は欠落
+            decoded_video(80_000, 3000, 640, 480),
+        ]);
+
+        apply_decoded_video_infos_by_timestamp(&mut samples, &mut pending);
+
+        assert!(
+            pending.is_empty(),
+            "存在する timestamp は全て対応付けられること"
+        );
+        assert_eq!(
+            samples[0].decoded_data_size,
+            Some(1000),
+            "先頭サンプルは自分のデコード結果を持つこと"
+        );
+        assert_eq!(
+            samples[1].decoded_data_size, None,
+            "欠落した timestamp のサンプルは未設定のまま残ること"
+        );
+        assert_eq!(samples[1].width, None);
+        assert_eq!(samples[1].height, None);
+        assert_eq!(
+            samples[2].decoded_data_size,
+            Some(3000),
+            "後続サンプルは自分の timestamp のデコード結果を持つこと"
+        );
+        assert_eq!(samples[2].width, Some(640));
+        assert_eq!(samples[2].height, Some(480));
+    }
+
+    #[test]
+    fn apply_decoded_video_infos_keeps_pending_until_encoded_arrives() {
+        // デコード出力がエンコード済みサンプルより先に来た場合、対応するサンプルが来るまで pending に残ること
+        let mut samples = vec![video_sample(0, 100)];
+        let mut pending = VecDeque::from([
+            decoded_video(0, 1000, 320, 240),
+            decoded_video(40_000, 2000, 320, 240),
+        ]);
+
+        apply_decoded_video_infos_by_timestamp(&mut samples, &mut pending);
+
+        assert_eq!(samples[0].decoded_data_size, Some(1000));
+        assert_eq!(
+            pending.len(),
+            1,
+            "未到着のエンコード済みサンプル向けデコード出力が残ること"
+        );
+        assert_eq!(pending[0].timestamp, Duration::from_micros(40_000));
+
+        // 後からエンコード済みサンプルが来たら対応付けられること
+        samples.push(video_sample(40_000, 110));
+        apply_decoded_video_infos_by_timestamp(&mut samples, &mut pending);
+
+        assert!(pending.is_empty());
+        assert_eq!(samples[1].decoded_data_size, Some(2000));
+        assert_eq!(samples[1].width, Some(320));
+        assert_eq!(samples[1].height, Some(240));
     }
 }
