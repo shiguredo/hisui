@@ -423,7 +423,9 @@ struct DecodedVideoInfo {
 
 /// デコード出力を同じ timestamp のエンコード済み映像サンプルへ載せる
 ///
+/// 同じ timestamp の未設定サンプルのうち先頭へ載せる。既に設定済みのサンプルは上書きしない。
 /// 対応するエンコード済みサンプルがまだ無いデコード出力は `pending` に残す。
+/// 同じ timestamp のサンプルが既に全て設定済みなら、そのデコード出力は破棄する。
 /// 見つからない timestamp のサンプルへは繰り下げない (FIFO ではない)。
 fn apply_decoded_video_infos_by_timestamp(
     video_samples: &mut [VideoSampleInfo],
@@ -433,11 +435,16 @@ fn apply_decoded_video_infos_by_timestamp(
     while let Some(decoded_info) = pending.pop_front() {
         if let Some(info) = video_samples
             .iter_mut()
-            .find(|s| s.timestamp == decoded_info.timestamp)
+            .find(|s| s.timestamp == decoded_info.timestamp && s.decoded_data_size.is_none())
         {
             info.decoded_data_size = Some(decoded_info.decoded_data_size);
             info.width = decoded_info.width;
             info.height = decoded_info.height;
+        } else if video_samples
+            .iter()
+            .any(|s| s.timestamp == decoded_info.timestamp)
+        {
+            // 同じ timestamp のサンプルは既に全て設定済みなので上書きせず破棄する
         } else {
             // エンコード済みサンプルがまだ来ていないので後で再試行する
             remaining.push_back(decoded_info);
@@ -1015,5 +1022,49 @@ mod tests {
         assert_eq!(samples[1].decoded_data_size, Some(2000));
         assert_eq!(samples[1].width, Some(320));
         assert_eq!(samples[1].height, Some(240));
+    }
+
+    #[test]
+    fn apply_decoded_video_infos_fills_duplicate_timestamps_in_order() {
+        // 同一 timestamp のサンプルが複数ある場合、未設定の先頭から順に載せること
+        let mut samples = vec![video_sample(0, 100), video_sample(0, 110)];
+        let mut pending = VecDeque::from([
+            decoded_video(0, 1000, 320, 240),
+            decoded_video(0, 2000, 640, 480),
+        ]);
+
+        apply_decoded_video_infos_by_timestamp(&mut samples, &mut pending);
+
+        assert!(pending.is_empty(), "両方のデコード出力が対応付けられること");
+        assert_eq!(samples[0].decoded_data_size, Some(1000));
+        assert_eq!(samples[0].width, Some(320));
+        assert_eq!(samples[0].height, Some(240));
+        assert_eq!(samples[1].decoded_data_size, Some(2000));
+        assert_eq!(samples[1].width, Some(640));
+        assert_eq!(samples[1].height, Some(480));
+    }
+
+    #[test]
+    fn apply_decoded_video_infos_does_not_overwrite_already_applied() {
+        // 同じ timestamp のサンプルが既に設定済みなら上書きせず、余分なデコード出力は破棄すること
+        let mut samples = vec![video_sample(0, 100)];
+        let mut pending = VecDeque::from([decoded_video(0, 1000, 320, 240)]);
+        apply_decoded_video_infos_by_timestamp(&mut samples, &mut pending);
+        assert_eq!(samples[0].decoded_data_size, Some(1000));
+
+        pending.push_back(decoded_video(0, 9999, 1, 1));
+        apply_decoded_video_infos_by_timestamp(&mut samples, &mut pending);
+
+        assert!(
+            pending.is_empty(),
+            "既設定済み timestamp への再適用は破棄されて pending に残らないこと"
+        );
+        assert_eq!(
+            samples[0].decoded_data_size,
+            Some(1000),
+            "既に設定済みの decoded_data_size は上書きされないこと"
+        );
+        assert_eq!(samples[0].width, Some(320));
+        assert_eq!(samples[0].height, Some(240));
     }
 }
