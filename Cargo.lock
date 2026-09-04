@@ -1398,7 +1398,7 @@ checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "hisui"
-version = "2026.1.0-canary.4"
+version = "2026.1.0-canary.5"
 dependencies = [
  "aws-lc-rs",
  "base64ct",
