@@ -24,12 +24,12 @@ exclude = ["fuzz"]
 
 [workspace.dependencies]
 noargs = "=0.4.3"
-nojson = "=0.3.14"
+nojson = "=0.3.15"
 shiguredo_http11 = "=2026.6.1"
 shiguredo_libvpx = "=2026.2.0-canary.1"
 shiguredo_mp4 = "=2026.4.0"
 shiguredo_opus = "=2026.2.0"
-shiguredo_rtsp = "=2026.1.0-canary.1"
+shiguredo_rtsp = "=2026.1.0-canary.2"
 shiguredo_webrtc = "=0.150.3"
 shiguredo_websocket = "=2026.3.0"
 tokio = {
@@ -52,7 +52,7 @@ tracing-subscriber = { version = "=0.3.23", features = ["fmt", "std"] }
 # NOTE: 通常の依存は突然挙動が変わることが内容に、バージョンは厳密一致で指定している
 # NOTE: examples と共有する依存は [workspace.dependencies] で定義している
 
-aws-lc-rs = "=1.18.0"
+aws-lc-rs = "=1.18.1"
 base64ct = { version = "=1.8.3", features = ["alloc"] }
 libc = "=0.2.189"
 mpeg2ts = "=0.6.1"
@@ -78,7 +78,7 @@ shiguredo_mpd = "=2026.1.0-canary.0"
 shiguredo_rtmp = "=2026.1.0-canary.6"
 shiguredo_rtsp = { workspace = true }
 shiguredo_s3 = {
-  version = "=2026.1.0-canary.6",
+  version = "=2026.1.0-canary.7",
   default-features = false,
   features = [
     "aws_lc_rs",
@@ -87,22 +87,22 @@ shiguredo_s3 = {
 shiguredo_srt = "=2026.1.0-canary.1"
 shiguredo_video_device = "=2026.3.0"
 shiguredo_webrtc = { workspace = true }
-sora_sdk = "=2026.1.0-canary.17"
+sora_sdk = "=2026.1.0-canary.21"
 tokio = { workspace = true }
 tokio-rustls = "=0.26.4"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-shiguredo_dav1d = "=2026.2.0-canary.2"
+shiguredo_dav1d = "=2026.2.0"
 shiguredo_libvpx = { workspace = true }
-shiguredo_libyuv = "=2026.2.0-canary.2"
+shiguredo_libyuv = "=2026.2.0-canary.5"
 shiguredo_nvcodec = { version = "=2026.3.0-canary.0", optional = true }
-shiguredo_openh264 = "=2026.1.0"
+shiguredo_openh264 = "=2026.2.0"
 shiguredo_opus = { workspace = true }
 shiguredo_svt_av1 = "=2026.2.0"
 shiguredo_websocket = { workspace = true }
 
-shiguredo_fdk_aac = { version = "=2026.1.0-canary.1", optional = true }
+shiguredo_fdk_aac = { version = "=2026.1.0", optional = true }
 
 raw_player = { version = "=2026.2.0", optional = true }
 
@@ -112,7 +112,7 @@ candle-nn = { version = "=0.11.0", optional = true }
 candle-onnx = { version = "=0.11.0", optional = true }
 candle-transformers = { version = "=0.11.0", optional = true }
 tokenizers = {
-  version = "=0.23.1",
+  version = "=0.23.2",
   default-features = false,
   features = ["onig"],
   optional = true
