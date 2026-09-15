@@ -50,23 +50,22 @@ struct BootstrapSession {
     ice_candidates: Vec<crate::sdp::GatheredIceCandidate>,
     // libwebrtc の Thread は PeerConnectionFactory が内部で参照し続けるため、
     // Session のライフタイム全体にわたって保持する必要がある。
+    // worker thread には network thread を使うため、専用の worker thread は保持しない。
     _network: Thread,
-    _worker: Thread,
     _signaling: Thread,
 }
 
 /// WebRTC factory 初期化 → PeerConnection 作成 → offer/answer bootstrap を行う共通処理
 async fn bootstrap_session(host: &str, port: u16) -> Result<BootstrapSession, String> {
     let mut network = Thread::new_with_socket_server();
-    let mut worker = Thread::new();
     let mut signaling = Thread::new();
     network.start();
-    worker.start();
     signaling.start();
 
     let mut deps = PeerConnectionFactoryDependencies::new();
     deps.set_network_thread(&network);
-    deps.set_worker_thread(&worker);
+    // worker thread には network thread を使う
+    deps.set_worker_thread(&network);
     deps.set_signaling_thread(&signaling);
     deps.set_event_log_factory(RtcEventLogFactory::new());
 
@@ -126,7 +125,6 @@ async fn bootstrap_session(host: &str, port: u16) -> Result<BootstrapSession, St
         ice_rx,
         ice_candidates: initial_ice_candidates,
         _network: network,
-        _worker: worker,
         _signaling: signaling,
     })
 }
