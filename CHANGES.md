@@ -318,6 +318,9 @@
   - @sile
 - [UPDATE] shiguredo_video_device のバージョンを 2026.1.0 にあげる
   - @sile
+- [UPDATE] WebRTC factory の worker thread に network thread を使う
+  - 専用 worker thread の生成を削除し、`PeerConnectionFactoryDependencies::set_worker_thread` に network thread を渡す
+  - @melpon
 
 ## 2025.3.3
 

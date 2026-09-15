@@ -12,22 +12,20 @@ pub(crate) struct WebRtcFactoryBundle {
     factory: Arc<PeerConnectionFactory>,
     audio_state: Arc<SharedAudioState>,
     _network: Thread,
-    _worker: Thread,
     _signaling: Thread,
 }
 
 impl WebRtcFactoryBundle {
     pub(crate) fn new() -> crate::Result<Self> {
         let mut network = Thread::new_with_socket_server();
-        let mut worker = Thread::new();
         let mut signaling = Thread::new();
         network.start();
-        worker.start();
         signaling.start();
 
         let mut deps = PeerConnectionFactoryDependencies::new();
         deps.set_network_thread(&network);
-        deps.set_worker_thread(&worker);
+        // worker thread には network thread を使う
+        deps.set_worker_thread(&network);
         deps.set_signaling_thread(&signaling);
         deps.set_event_log_factory(RtcEventLogFactory::new());
 
@@ -51,7 +49,6 @@ impl WebRtcFactoryBundle {
             factory: Arc::new(factory),
             audio_state,
             _network: network,
-            _worker: worker,
             _signaling: signaling,
         })
     }
