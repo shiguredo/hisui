@@ -1,7 +1,7 @@
 # WebRTC factory の worker thread を network thread に統一する
 
 - Created: 2026-09-15
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-09-15
 - Branch: feature/refactor-unify-worker-thread
 - Polished: {YYYY-MM-DD}
 
@@ -32,3 +32,15 @@ WebRTC factory のために専用の worker thread を生成するのをやめ�
 - 両方の `set_worker_thread` に network thread が渡されていること
 - `cargo check --workspace` / `cargo clippy --workspace --all-targets` / `cargo test --workspace` が通ること
 - `CHANGES.md` の `## develop` に追記すること
+
+## 解決方法
+
+WebRTC factory の worker thread として network thread を使うようにした。
+
+- `src/webrtc/factory.rs` の `WebRtcFactoryBundle` から `_worker` フィールドと worker 用の `Thread::new()` / `start()` を削除し、`set_worker_thread` に network thread を渡すようにした
+- `examples/obsws_bootstrap/src/client.rs` の `BootstrapSession` と `bootstrap_session()` も同じ変更を行い、drop 順のコメントを更新した
+- `CHANGES.md` の `## develop` に追記した
+
+確認:
+
+- `cargo check --workspace` / `cargo clippy --workspace --all-targets` / `cargo test --workspace` が通ることを確認した
